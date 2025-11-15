@@ -53,6 +53,23 @@
             .replace(/-+/g, "-")
             .replace(/^-|-$/g, "") || "asset";
 
+    /**
+     * Returns a human-friendly display name for an asset by stripping
+     * a leading timestamp prefix (e.g. "1763181854469-name.png" -> "name.png").
+     * Falls back to the raw value when it does not match the pattern.
+     * @param {string} value - Asset name or id
+     * @returns {string} Display name
+     */
+    const getDisplayName = (value) => {
+        const raw = (value || "").split("/").pop();
+        if (!raw) {
+            return "asset";
+        }
+
+        const match = raw.match(/^\d{10,}-(.+)$/);
+        return match && match[1] ? match[1] : raw;
+    };
+
     const evalScript = (script) =>
         new Promise((resolve, reject) => {
             try {
@@ -365,8 +382,9 @@
     };
 
     const handleAssetDownload = async (asset, button) => {
+        const displayName = getDisplayName(asset.name || asset.id);
         setLoading(true);
-        setStatus(`Downloading ${asset.name || "asset"}…`, "info");
+        setStatus(`Downloading ${displayName}…`, "info");
         button.disabled = true;
         const originalLabel = button.textContent;
         button.textContent = "Downloading…";
@@ -387,7 +405,7 @@
 
             // Step 3: Import into After Effects
             button.textContent = "Importing…";
-            setStatus(`Importing ${asset.name || "asset"}…`, "info");
+            setStatus(`Importing ${displayName}…`, "info");
             log("Importing asset into After Effects from:", importPath);
             
             const result = await evalScript(
@@ -399,7 +417,7 @@
             }
             
             log("Asset imported successfully:", asset.id);
-            setStatus(result || `${asset.name || "Asset"} imported successfully.`, "success");
+            setStatus(result || `${displayName || "Asset"} imported successfully.`, "success");
         } catch (error) {
             console.error(LOG_PREFIX, "Import failed", error);
             setStatus(error.message || "Unable to import asset.", "error");
@@ -437,15 +455,16 @@
     const createAssetCard = (asset) => {
         const card = document.createElement("article");
         card.className = "asset-card";
+        const displayName = getDisplayName(asset.name || asset.id);
 
         const img = document.createElement("img");
         img.className = "asset-card__thumb";
-        img.alt = asset.name || "Asset thumbnail";
+        img.alt = displayName || "Asset thumbnail";
         img.src = asset.thumbnail || PLACEHOLDER_THUMB;
 
         const title = document.createElement("p");
         title.className = "asset-card__title";
-        title.textContent = asset.name || "Untitled asset";
+        title.textContent = displayName || "Untitled asset";
 
         const button = document.createElement("button");
         button.type = "button";
