@@ -95,7 +95,7 @@ If the problem persists, contact your administrator for a new key.
 ### Assets Not Loading
 
 1. Verify your API key is valid
-2. Check that the API base URL is correct in `main.js` (default: `https://api.viewseditors.com/`)
+2. Check that the API base URL is correct in `main.js` (default: `https://api.viewseditors.com`)
 3. Ensure you have network connectivity to the API server
 4. Check the browser console for error messages
 

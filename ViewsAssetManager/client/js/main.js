@@ -9,7 +9,7 @@
  */
 
 (function () {
-    const API_BASE_URL = "https://api.viewseditors.com/";
+    const API_BASE_URL = "https://api.viewseditors.com";
     const API_KEY_STORAGE_KEY = "views_asset_manager_api_key";
     const LOG_PREFIX = "[ViewsAssetManager]";
     const PLACEHOLDER_THUMB =
@@ -396,6 +396,7 @@
 
         // Test the key by making a request to the API
         try {
+            log(`Testing API key against ${API_BASE_URL}/assets`);
             const response = await fetch(`${API_BASE_URL}/assets`, {
                 method: "GET",
                 cache: "no-cache",
@@ -406,19 +407,40 @@
                 }
             });
 
+            log(`Validation response: ${response.status} ${response.statusText}`);
+
             if (response.status === 401) {
                 throw new Error("Invalid API key. Please check and try again.");
+            }
+
+            if (response.status === 500) {
+                // Get more details about the server error
+                let errorDetails = "";
+                try {
+                    const errorData = await response.json();
+                    errorDetails = errorData.message || errorData.error || "";
+                } catch (e) {
+                    // Ignore JSON parse errors
+                }
+                throw new Error(`Server error (500)${errorDetails ? ": " + errorDetails : ". Please try again later or contact support."}`);
             }
 
             if (!response.ok && response.status !== 404) {
                 throw new Error(`API error ${response.status}: ${response.statusText}`);
             }
 
+            // 200 or 404 are both acceptable (404 just means no assets yet)
             return true;
         } catch (error) {
-            if (error.message.includes("API error") || error.message.includes("Invalid API key")) {
+            // Re-throw our custom errors
+            if (error.message.includes("API error") || 
+                error.message.includes("Invalid API key") || 
+                error.message.includes("Server error")) {
                 throw error;
             }
+            
+            // Network or other errors
+            log("Validation error:", error);
             throw new Error("Unable to validate API key. Check your network connection.");
         }
     };
