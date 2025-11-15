@@ -229,7 +229,10 @@
         if (!assetId) {
             throw new Error("Asset id missing.");
         }
-        return fetchJson(`/assets/${assetId}/download`);
+        // URL-encode the asset ID since it contains slashes
+        const encodedId = encodeURIComponent(assetId);
+        log(`Requesting download for asset: ${assetId} (encoded: ${encodedId})`);
+        return fetchJson(`/assets/${encodedId}/download`);
     };
 
     /**
