@@ -236,66 +236,131 @@
     };
 
     /**
-     * Downloads a file from a URL and saves it directly to the temp directory
-     * Uses CSInterface filesystem API to avoid memory issues with large files
-     * @param {string} url - The URL to download from (presigned URL from API)
+     * Downloads a file from a URL and saves it to a temp directory.
+     * Prefers Node.js streaming (more reliable in CEP) and falls back to browser APIs.
+     * @param {string} downloadUrl - The URL to download from (presigned URL from API)
      * @param {string} fileName - Name for the saved file
-     * @returns {Promise<string>} Path to the downloaded file
+     * @returns {Promise<string>} Absolute path to the downloaded file
      */
-    const downloadFileToTemp = async (url, fileName) => {
-        log("Downloading file from presigned URL...");
-        const response = await fetch(url, {
+    const downloadFileToTemp = async (downloadUrl, fileName) => {
+        const safeName = sanitizeFileName(fileName);
+
+        // Prefer Node.js (enabled via --enable-nodejs in the manifest)
+        if (typeof require === "function") {
+            log("Downloading file via Node.js stream...");
+
+            /** @type {typeof import('fs')} */
+            const fs = require("fs");
+            /** @type {typeof import('path')} */
+            const path = require("path");
+            /** @type {typeof import('os')} */
+            const os = require("os");
+            /** @type {typeof import('http')} */
+            const http = require("http");
+            /** @type {typeof import('https')} */
+            const https = require("https");
+
+            return new Promise((resolve, reject) => {
+                try {
+                    const tempDir = path.join(os.tmpdir(), "ViewsAssetManager");
+                    if (!fs.existsSync(tempDir)) {
+                        fs.mkdirSync(tempDir, { recursive: true });
+                    }
+
+                    const filePath = path.join(tempDir, safeName);
+                    const fileStream = fs.createWriteStream(filePath);
+                    const client = downloadUrl.indexOf("https") === 0 ? https : http;
+
+                    let downloadedBytes = 0;
+                    const request = client.get(downloadUrl, (response) => {
+                        if (response.statusCode !== 200) {
+                            const message = "Failed to download file: " + response.statusCode + " " + (response.statusMessage || "");
+                            response.resume();
+                            reject(new Error(message));
+                            return;
+                        }
+
+                        response.on("data", function (chunk) {
+                            downloadedBytes += chunk.length;
+                        });
+
+                        response.pipe(fileStream);
+
+                        fileStream.on("finish", function () {
+                            fileStream.close(function () {
+                                const sizeInMB = (downloadedBytes / 1024 / 1024).toFixed(2);
+                                log("Downloaded " + sizeInMB + " MB to temp: " + filePath);
+                                resolve(filePath);
+                            });
+                        });
+                    });
+
+                    request.on("error", function (error) {
+                        try {
+                            fileStream.close();
+                            fs.unlinkSync(filePath);
+                        } catch (e) {
+                            // ignore cleanup errors
+                        }
+                        reject(error);
+                    });
+                } catch (error) {
+                    reject(error);
+                }
+            });
+        }
+
+        // Fallback: browser fetch + CEP FileReader + JSX bridge (original implementation)
+        log("Downloading file via fetch/blob fallback...");
+        const response = await fetch(downloadUrl, {
             method: "GET",
             cache: "no-cache"
         });
 
         if (!response.ok) {
-            throw new Error(`Failed to download file: ${response.status} ${response.statusText}`);
+            throw new Error("Failed to download file: " + response.status + " " + response.statusText);
         }
 
-        const arrayBuffer = await response.arrayBuffer();
-        const uint8Array = new Uint8Array(arrayBuffer);
-        
-        log(`Downloaded ${(uint8Array.length / 1024 / 1024).toFixed(2)} MB`);
-        
-        // Get temp directory path
-        const tempDir = csInterface.getSystemPath(SystemPath.USER_DATA) + "/ViewsAssetManager";
-        
-        // Create directory using JSX
-        await evalScript(`
-            var folder = new Folder("${escapeForEval(tempDir)}");
-            if (!folder.exists) folder.create();
-            "OK";
-        `);
-        
-        // Build file path
-        const safeName = sanitizeFileName(fileName);
-        const filePath = tempDir + "/" + safeName;
-        
-        log(`Saving to: ${filePath}`);
-        
-        // Write file using CSInterface
+        const blob = await response.blob();
+        const sizeInMB = (blob.size / 1024 / 1024).toFixed(2);
+
+        log("Downloaded " + sizeInMB + " MB (" + blob.type + ")");
+
+        // Warn about large files (>10MB can be slow)
+        if (blob.size > 10 * 1024 * 1024) {
+            log("Warning: Large file (" + sizeInMB + " MB) - this may take a moment...");
+        }
+
+        // Convert blob to base64 and send through JSX, as before
         return new Promise((resolve, reject) => {
-            try {
-                // Convert Uint8Array to base64 for CSInterface.writeFile
-                let binary = "";
-                for (let i = 0; i < uint8Array.length; i++) {
-                    binary += String.fromCharCode(uint8Array[i]);
+            const reader = new FileReader();
+
+            reader.onload = async () => {
+                try {
+                    const base64 = reader.result.split(",")[1];
+                    log("Converted to base64, saving as " + safeName + " via JSX...");
+
+                    const tempPath = await evalScript(
+                        'saveToTemp(\"' + escapeForEval(base64) + '\", \"' + escapeForEval(safeName) + '\")'
+                    );
+
+                    if (!tempPath || (typeof tempPath === "string" && tempPath.indexOf("Error") === 0)) {
+                        reject(new Error(tempPath || "Failed to save file"));
+                        return;
+                    }
+
+                    log("File saved via JSX: " + tempPath);
+                    resolve(tempPath);
+                } catch (error) {
+                    reject(error);
                 }
-                const base64 = btoa(binary);
-                
-                // Write file
-                const result = csInterface.writeFile(filePath, base64, "Base64");
-                
-                if (result.err === 0) {
-                    log(`File saved successfully: ${filePath}`);
-                    resolve(filePath);
-                } else {
-                    reject(new Error(`Failed to write file: Error code ${result.err}`));
-                }
-            } catch (error) {
-                reject(error);
-            }
+            };
+
+            reader.onerror = () => {
+                reject(new Error("Failed to read downloaded file"));
+            };
+
+            reader.readAsDataURL(blob);
         });
     };
 
