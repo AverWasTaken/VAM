@@ -35,13 +35,57 @@
         hideKeyIcon: document.getElementById("hideKeyIcon")
     };
 
+    const LoadingOverlay = {
+        el: document.getElementById("loadingOverlay"),
+        title: document.getElementById("loadingTitle"),
+        message: document.getElementById("loadingMessage"),
+        progressContainer: document.getElementById("loadingProgress"),
+        progressBar: document.getElementById("loadingProgressBar"),
+        
+        show(title = "Loading...", message = "Please wait") {
+            this.title.textContent = title;
+            this.message.textContent = message;
+            this.el.classList.remove("loading-overlay--hidden");
+            this.hideProgress();
+        },
+        
+        hide() {
+            this.el.classList.add("loading-overlay--hidden");
+        },
+        
+        update(message) {
+            if (message) this.message.textContent = message;
+        },
+        
+        showProgress(percent) {
+            this.progressContainer.classList.remove("hidden");
+            this.progressBar.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+        },
+        
+        hideProgress() {
+            this.progressContainer.classList.add("hidden");
+            this.progressBar.style.width = "0%";
+        }
+    };
+
     const state = {
-        assets: [],
+        allAssets: [], // All assets from API
+        displayedAssets: [], // Currently displayed filtered assets
+        filteredAssets: [], // All assets matching current folder
         folders: [],
-        selectedFolderId: "all", // "all" or folder UUID
+        selectedFolderId: null, // Start with no folder selected
         apiKey: "",
         deviceId: null, // Cached device ID (generated once)
-        isFirstRun: false
+        isFirstRun: false,
+        isWelcome: true, // Track welcome screen state
+        pagination: {
+            page: 1,
+            limit: 20,
+            total: 0
+        },
+        visibleCount: 20, // How many assets to show (for "Load More")
+        fetchSession: 0, // ID to track active fetch requests
+        cache: {} // Cache for asset requests: "folderId:page" -> { assets, total }
     };
 
     const escapeForEval = (value) =>
@@ -268,28 +312,237 @@
     };
 
     /**
-     * Fetches the asset catalog from the API
-     * Expected response format: { assets: [...] }
-     * Each asset contains: id, name, size, thumbnail, uploadDate, folderId
+     * Renders the welcome screen
      */
-    const fetchAssets = async () => {
+    const renderWelcomeScreen = () => {
+        elements.grid.innerHTML = "";
+        
+        const container = document.createElement("div");
+        container.className = "welcome-screen";
+        container.style.display = "flex";
+        container.style.flexDirection = "column";
+        container.style.alignItems = "center";
+        container.style.justifyContent = "center";
+        container.style.minHeight = "100%";
+        container.style.gridColumn = "1 / -1"; // Fix squished look by spanning all columns
+        container.style.color = "var(--ae-text-secondary)";
+        container.style.textAlign = "center";
+        container.style.padding = "2rem";
+
+        const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        icon.setAttribute("width", "48");
+        icon.setAttribute("height", "48");
+        icon.setAttribute("viewBox", "0 0 24 24");
+        icon.setAttribute("fill", "currentColor");
+        icon.style.marginBottom = "1rem";
+        icon.style.opacity = "0.5";
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", "M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z");
+        icon.appendChild(path);
+
+        const title = document.createElement("h2");
+        title.textContent = "Welcome to Views Asset Manager";
+        title.style.margin = "0 0 0.5rem 0";
+        title.style.fontSize = "1.2rem";
+        title.style.fontWeight = "600";
+        title.style.color = "var(--ae-text-primary)";
+
+        const text = document.createElement("p");
+        text.textContent = "Select a folder from the sidebar to view assets.";
+        text.style.margin = "0 0 2rem 0";
+
+        const credits = document.createElement("div");
+        credits.style.fontSize = "0.85rem";
+        credits.style.opacity = "0.7";
+        credits.style.lineHeight = "1.6";
+        credits.innerHTML = `
+            <p style="margin: 0 0 0.5rem 0">Made by ayvyr, assets by soracrt.</p>
+            <p style="margin: 0">If you have issues, join <a href="#" id="discordLink" style="color: var(--ae-accent); text-decoration: none; border-bottom: 1px solid transparent;">discord.gg/views</a> and make a ticket.</p>
+        `;
+
+        container.appendChild(icon);
+        container.appendChild(title);
+        container.appendChild(text);
+        container.appendChild(credits);
+
+        elements.grid.appendChild(container);
+
+        // Handle external link
+        const link = container.querySelector("#discordLink");
+        if (link) {
+            link.addEventListener("mouseenter", () => link.style.borderBottomColor = "var(--ae-accent)");
+            link.addEventListener("mouseleave", () => link.style.borderBottomColor = "transparent");
+            link.addEventListener("click", (e) => {
+                e.preventDefault();
+                csInterface.openURLInDefaultBrowser("https://discord.gg/views");
+            });
+        }
+
+        setStatus("Ready.", "info");
+    };
+
+    /**
+     * Filters assets by current folder
+     * @param {Array} allAssets - List of all assets
+     * @returns {Array} - Filtered assets
+     */
+    const filterAssetsByFolder = (allAssets) => {
+        if (String(state.selectedFolderId) === "all") {
+            return allAssets;
+        }
+        // folderId in asset might be null for root, so handle "null" string comparison if needed
+        // usually API returns null for root assets
+        return allAssets.filter(asset => {
+            const assetFolder = asset.folderId || "null"; // Normalize null to string if needed, but likely just check equality
+            // If selectedFolderId is a specific ID, match it.
+            return String(asset.folderId) === String(state.selectedFolderId);
+        });
+    };
+
+    /**
+     * Fetches ALL assets from the API to allow client-side filtering
+     */
+    const syncAssets = async () => {
+        state.fetchSession++;
+        const currentSession = state.fetchSession;
+        
+        setStatus("Syncing assets...", "info");
         setLoading(true);
-        setStatus("Fetching assets…", "info");
+        
         try {
-            log("Fetching asset catalog.");
-            const data = await fetchJson("/assets");
-            const assets = Array.isArray(data) ? data : data.assets || [];
-            state.assets = assets;
-            renderFilteredAssets();
-            log(`Loaded ${assets.length} assets.`);
-            setStatus(`${assets.length} assets ready.`, "success");
+            let page = 1;
+            const limit = 100; // Larger batch for efficiency
+            let allFetched = [];
+            let total = 0;
+            
+            // Fetch first page to get total and first batch
+            log(`Syncing assets page ${page}...`);
+            let data = await fetchJson(`/assets?page=${page}&limit=${limit}`);
+            
+            allFetched = [...(data.assets || [])];
+            total = data.total || 0;
+            
+            // Fetch remaining pages if needed
+            const totalPages = Math.ceil(total / limit);
+            
+            if (totalPages > 1) {
+                log(`Fetching ${totalPages - 1} more pages...`);
+                const promises = [];
+                for (let p = 2; p <= totalPages; p++) {
+                    promises.push(fetchJson(`/assets?page=${p}&limit=${limit}`));
+                }
+                
+                const results = await Promise.all(promises);
+                results.forEach(res => {
+                    if (res.assets) {
+                        allFetched = [...allFetched, ...res.assets];
+                    }
+                });
+            }
+            
+            if (state.fetchSession !== currentSession) return;
+
+            state.allAssets = allFetched;
+            log(`Synced ${state.allAssets.length} assets.`);
+            
+            // Update view
+            updateAssetView();
+            
         } catch (error) {
-            console.error(LOG_PREFIX, "Failed to load assets", error);
-            state.assets = [];
-            renderFilteredAssets();
-            setStatus(error.message || "Unable to load assets.", "error");
+            console.error(LOG_PREFIX, "Failed to sync assets", error);
+            setStatus("Failed to sync assets.", "error");
+            if (state.fetchSession === currentSession) {
+                renderAssets([]);
+            }
         } finally {
-            setLoading(false);
+            if (state.fetchSession === currentSession) {
+                setLoading(false);
+                elements.refreshButton.disabled = false;
+            }
+        }
+    };
+
+    /**
+     * Updates the displayed assets based on selection and pagination
+     */
+    const updateAssetView = () => {
+        if (state.isWelcome) return;
+
+        // 1. Filter by folder
+        const filtered = filterAssetsByFolder(state.allAssets);
+        state.filteredAssets = filtered;
+        
+        // 2. Slice for display
+        const toShow = filtered.slice(0, state.visibleCount);
+        state.displayedAssets = toShow;
+        
+        // 3. Render
+        renderAssets(toShow);
+        
+        // 4. Update status
+        if (state.selectedFolderId !== "all" && filtered.length === 0 && state.allAssets.length > 0) {
+             // Folder empty
+        } else if (filtered.length > 0) {
+            setStatus(`${filtered.length} assets found.`, "success");
+        }
+        
+        updateLoadMoreButton();
+        updateFolderCounts();
+    };
+
+    /**
+     * Updates counts in the sidebar
+     */
+    const updateFolderCounts = () => {
+        // Count assets per folder
+        const counts = { all: state.allAssets.length };
+        state.allAssets.forEach(asset => {
+            if (asset.folderId) {
+                counts[asset.folderId] = (counts[asset.folderId] || 0) + 1;
+            }
+        });
+
+        // Update UI
+        elements.folderList.querySelectorAll(".folder-item").forEach(item => {
+            const fid = item.dataset.folderId;
+            const count = counts[fid] || 0;
+            const countSpan = item.querySelector(".folder-item__count");
+            if (countSpan) countSpan.textContent = count;
+        });
+    };
+
+    /**
+     * Updates the Load More button state
+     */
+    const updateLoadMoreButton = () => {
+        const mainContent = document.querySelector(".main-content");
+        let btn = document.getElementById("loadMoreBtn");
+        
+        const hasMore = state.displayedAssets.length < state.filteredAssets.length;
+        
+        if (hasMore) {
+            if (!btn) {
+                btn = document.createElement("button");
+                btn.id = "loadMoreBtn";
+                btn.className = "btn btn--secondary";
+                btn.textContent = "Load More";
+                btn.style.margin = "1rem auto";
+                btn.style.display = "block";
+                btn.style.width = "200px";
+                
+                btn.addEventListener("click", () => {
+                    state.visibleCount += 20;
+                    updateAssetView();
+                });
+                
+                mainContent.appendChild(btn);
+            }
+            
+            btn.style.display = "block";
+        } else {
+            if (btn) {
+                btn.style.display = "none";
+            }
         }
     };
 
@@ -314,9 +567,11 @@
      * Prefers Node.js streaming (more reliable in CEP) and falls back to browser APIs.
      * @param {string} downloadUrl - The URL to download from (presigned URL from API)
      * @param {string} fileName - Name for the saved file
+     * @param {Object} headers - Optional headers to include in the request
+     * @param {Function} onProgress - Optional callback (downloaded, total) => void
      * @returns {Promise<string>} Absolute path to the downloaded file
      */
-    const downloadFileToTemp = async (downloadUrl, fileName) => {
+    const downloadFileToTemp = async (downloadUrl, fileName, headers = {}, onProgress) => {
         const safeName = sanitizeFileName(fileName);
 
         // Prefer Node.js (enabled via --enable-nodejs in the manifest)
@@ -343,10 +598,21 @@
 
                     const filePath = path.join(tempDir, safeName);
                     const fileStream = fs.createWriteStream(filePath);
-                    const client = downloadUrl.indexOf("https") === 0 ? https : http;
+                    
+                    // Parse URL to handle options correctly
+                    const urlObj = new URL(downloadUrl);
+                    const options = {
+                        hostname: urlObj.hostname,
+                        port: urlObj.port || (urlObj.protocol === 'https:' ? 443 : 80),
+                        path: urlObj.pathname + urlObj.search,
+                        method: 'GET',
+                        headers: headers
+                    };
+
+                    const client = urlObj.protocol === "https:" ? https : http;
 
                     let downloadedBytes = 0;
-                    const request = client.get(downloadUrl, (response) => {
+                    const request = client.get(options, (response) => {
                         if (response.statusCode !== 200) {
                             const message = "Failed to download file: " + response.statusCode + " " + (response.statusMessage || "");
                             response.resume();
@@ -354,17 +620,17 @@
                             return;
                         }
 
-                        response.on("data", function (chunk) {
-                            downloadedBytes += chunk.length;
-                        });
+                        // Remove data listener to avoid potential stream consumption issues
+                        // response.on("data", ...);
 
                         response.pipe(fileStream);
 
                         fileStream.on("finish", function () {
                             fileStream.close(function () {
-                                const sizeInMB = (downloadedBytes / 1024 / 1024).toFixed(2);
-                                log("Downloaded " + sizeInMB + " MB to temp: " + filePath);
-                                resolve(filePath);
+                                // Normalize path to forward slashes for ExtendScript compatibility
+                                const normalizedPath = filePath.replace(/\\/g, "/");
+                                log("Downloaded file to temp: " + normalizedPath);
+                                resolve(normalizedPath);
                             });
                         });
                     });
@@ -388,13 +654,20 @@
         log("Downloading file via fetch/blob fallback...");
         const response = await fetch(downloadUrl, {
             method: "GET",
-            cache: "no-cache"
+            cache: "no-cache",
+            headers: headers
         });
 
         if (!response.ok) {
             throw new Error("Failed to download file: " + response.status + " " + response.statusText);
         }
 
+        const contentLength = response.headers.get("Content-Length");
+        const totalBytes = contentLength ? parseInt(contentLength, 10) : 0;
+        
+        // Note: Fetch body stream reading is needed for true progress in browser, 
+        // but usually Node.js path is used. For simplicity in fallback, we skip progress 
+        // unless we want to implement ReadableStream reader.
         const blob = await response.blob();
         const sizeInMB = (blob.size / 1024 / 1024).toFixed(2);
 
@@ -440,34 +713,95 @@
 
     const handleAssetDownload = async (asset, button) => {
         const displayName = getDisplayName(asset.name || asset.id);
-        setLoading(true);
-        setStatus(`Downloading ${displayName}…`, "info");
+        
+        LoadingOverlay.show(`Downloading ${displayName}`, "Starting download...");
         button.disabled = true;
-        const originalLabel = button.textContent;
-        button.textContent = "Downloading…";
 
         try {
             log("Starting import for asset:", asset.id);
             
-            // Step 1: Get presigned download URL
-            const payload = await requestAssetDownload(asset.id);
-            if (!payload.url) {
-                throw new Error("API did not provide a download URL.");
-            }
+            // Use cached endpoint for downloads (faster, no S3 cost)
+            // The endpoint handles S3 fallback if not in Redis
+            const encodedId = encodeURIComponent(asset.id);
+            const downloadUrl = `${API_BASE_URL}/assets/${encodedId}/cached`;
+            
+            // We must pass auth headers for the internal API
+            const deviceId = await ensureDeviceId();
+            const headers = {
+                "X-API-Key": state.apiKey,
+                "X-Device-ID": deviceId
+            };
 
-            // Step 2: Download and save to temp
-            button.textContent = "Downloading…";
+            // Download directly from the cached endpoint
             const fileName = sanitizeFileName(asset.name || "asset");
-            const importPath = await downloadFileToTemp(payload.url, fileName);
+            
+            // NOTE: Node.js progress is disabled for stability (stream conflict risk)
+            // We use indeterminate loading state instead
+            const onProgress = (downloaded, total) => {
+                if (total > 0) {
+                    const percent = (downloaded / total) * 100;
+                    const sizeMB = (total / 1024 / 1024).toFixed(1);
+                    const downloadedMB = (downloaded / 1024 / 1024).toFixed(1);
+                    LoadingOverlay.update(`${downloadedMB} MB / ${sizeMB} MB`);
+                    LoadingOverlay.showProgress(percent);
+                }
+            };
 
-            // Step 3: Import into After Effects
-            button.textContent = "Importing…";
-            setStatus(`Importing ${displayName}…`, "info");
+            const importPath = await downloadFileToTemp(downloadUrl, fileName, headers, onProgress);
+
+            // Small delay to ensure file is fully written and OS buffers are flushed
+            // This helps prevent file lock and read errors
+            await new Promise(resolve => setTimeout(resolve, 100));
+
+            // Import into After Effects
+            LoadingOverlay.show(`Importing ${displayName}`, "Adding to project...");
+            LoadingOverlay.hideProgress();
+            
             log("Importing asset into After Effects from:", importPath);
             
-            const result = await evalScript(
-                `importAndAddAsset("${escapeForEval(importPath)}")`
-            );
+            // Attempt import with retries to handle file locking
+            let attempts = 0;
+            const maxAttempts = 5;
+            let result;
+            
+            while (attempts < maxAttempts) {
+                try {
+                    // Add delay only between retry attempts, not on first attempt
+                    if (attempts > 0) {
+                        // Increasing delay to ensure file lock is released by OS/Node
+                        // 500ms, 1000ms, 1500ms, etc.
+                        const delay = 500 * attempts;
+                        log(`Waiting ${delay}ms before retry attempt ${attempts + 1}...`);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                    }
+                    
+                    result = await evalScript(
+                        `importAndAddAsset("${escapeForEval(importPath)}")`
+                    );
+                    
+                    // Check if it's a file lock error ("couldn't be open for reading")
+                    // If so, throw to trigger retry logic
+                    if (result && typeof result === "string" && 
+                       (result.includes("couldn't be open") || result.includes("File exists") || result.includes("I/O error"))) {
+                        throw new Error(result);
+                    }
+                    
+                    // If it's another error, break to handle it normally
+                    if (result && result.indexOf("Error") === 0) {
+                        break; 
+                    }
+                    
+                    // Success
+                    break;
+                } catch (e) {
+                    attempts++;
+                    log(`Import attempt ${attempts} failed (${e.message}), retrying...`);
+                    if (attempts >= maxAttempts) {
+                        // If we've run out of attempts, assign the error to result so it's handled below
+                        result = "Error: " + e.message;
+                    }
+                }
+            }
             
             if (result && result.indexOf("Error") === 0) {
                 throw new Error(result);
@@ -477,11 +811,21 @@
             setStatus(result || `${displayName || "Asset"} imported successfully.`, "success");
         } catch (error) {
             console.error(LOG_PREFIX, "Import failed", error);
-            setStatus(error.message || "Unable to import asset.", "error");
+            
+            // Provide more helpful error messages for common issues
+            let errorMessage = error.message || "Unable to import asset.";
+            
+            if (errorMessage.includes("corrupted") || errorMessage.includes("not of the correct type") || 
+                errorMessage.includes("doesn't seem to be a PNG") || errorMessage.includes("Import failed")) {
+                errorMessage = `Failed to import ${displayName}: File appears to be corrupted or invalid. Report this issue in a ticket on discord.gg/views`;
+            } else if (errorMessage.includes("couldn't be open")) {
+                errorMessage = `File is locked or in use. Please try again in a moment.`;
+            }
+            
+            setStatus(errorMessage, "error");
         } finally {
-            setLoading(false);
+            LoadingOverlay.hide();
             button.disabled = false;
-            button.textContent = originalLabel;
         }
     };
 
@@ -489,6 +833,7 @@
      * Counts assets per folder
      * @returns {Object} Map of folderId to count
      */
+    /* 
     const countAssetsByFolder = () => {
         const counts = { all: state.assets.length };
         state.assets.forEach((asset) => {
@@ -499,21 +844,20 @@
         });
         return counts;
     };
+    */
 
     /**
      * Renders the folder list in the sidebar
      * @param {Array} folders - Array of folder objects
      */
     const renderFolders = (folders) => {
-        const counts = countAssetsByFolder();
-        
         // Clear existing custom folders (keep "All Assets")
         const existingItems = elements.folderList.querySelectorAll('.folder-item:not([data-folder-id="all"])');
         existingItems.forEach(item => item.remove());
 
-        // Update count for "All Assets"
+        // Initialize "All Assets" count to "-" until loaded
         const allItem = elements.folderList.querySelector('[data-folder-id="all"] .folder-item__count');
-        if (allItem) allItem.textContent = counts.all;
+        if (allItem) allItem.textContent = "-";
 
         // Add folder items
         folders.forEach((folder) => {
@@ -537,7 +881,7 @@
 
             const countSpan = document.createElement("span");
             countSpan.className = "folder-item__count";
-            countSpan.textContent = counts[folder.id] || 0;
+            countSpan.textContent = "-"; // Initial state
 
             li.appendChild(svg);
             li.appendChild(nameSpan);
@@ -552,33 +896,44 @@
     };
 
     /**
-     * Selects a folder and filters assets
+     * Selects a folder and fetches assets for it
      * @param {string} folderId - Folder ID to select ("all" or folder UUID)
      */
     const selectFolder = (folderId) => {
-        state.selectedFolderId = folderId;
+        // Ensure strict string comparison
+        const targetId = String(folderId);
+        
+        if (String(state.selectedFolderId) === targetId && !state.isWelcome) return;
+        
+        state.selectedFolderId = targetId;
+        state.isWelcome = false; // Disable welcome screen once a folder is clicked
         
         // Update active state in UI
         elements.folderList.querySelectorAll(".folder-item").forEach((item) => {
-            item.classList.toggle("folder-item--active", item.dataset.folderId === folderId);
+            item.classList.toggle("folder-item--active", item.dataset.folderId === targetId);
         });
         
-        log(`Selected folder: ${folderId}`);
-        renderFilteredAssets();
+        log(`Selected folder: ${targetId}`);
+        
+        // Reset pagination and assets
+        state.pagination.page = 1;
+        state.visibleCount = 20;
+        
+        // Update view for selected folder
+        updateAssetView();
     };
 
     /**
-     * Filters and renders assets based on selected folder
+     * Updates the asset count display for a specific folder
+     * @param {string} folderId - The folder ID
+     * @param {number} count - The total count of assets
      */
-    const renderFilteredAssets = () => {
-        let filteredAssets = state.assets;
-        
-        if (state.selectedFolderId !== "all") {
-            // Show only assets in selected folder
-            filteredAssets = state.assets.filter(asset => asset.folderId === state.selectedFolderId);
+    const updateFolderCount = (folderId, count) => {
+        const countSpan = elements.folderList.querySelector(`.folder-item[data-folder-id="${folderId}"] .folder-item__count`);
+        if (countSpan) {
+            countSpan.textContent = count;
+            // Remove the loading state styling if we add any later
         }
-        
-        renderAssets(filteredAssets);
     };
 
     /**
@@ -620,10 +975,12 @@
         img.className = "asset-card__thumb";
         img.alt = displayName || "Asset thumbnail";
         img.src = asset.thumbnail || PLACEHOLDER_THUMB;
+        img.loading = "lazy";
 
         const title = document.createElement("p");
         title.className = "asset-card__title";
         title.textContent = displayName || "Untitled asset";
+        title.title = displayName; // Tooltip for full name
 
         const button = document.createElement("button");
         button.type = "button";
@@ -635,6 +992,72 @@
         card.appendChild(title);
         card.appendChild(button);
         return card;
+    };
+
+    /**
+     * Creates a skeleton asset card element
+     * @returns {HTMLElement} Article element containing the skeleton card
+     */
+    const createSkeletonCard = () => {
+        const card = document.createElement("article");
+        card.className = "asset-card asset-card--skeleton";
+
+        const img = document.createElement("div");
+        img.className = "asset-card__thumb skeleton";
+
+        const title = document.createElement("div");
+        title.className = "skeleton-text skeleton";
+
+        const button = document.createElement("div");
+        button.className = "skeleton-button skeleton";
+
+        card.appendChild(img);
+        card.appendChild(title);
+        card.appendChild(button);
+        return card;
+    };
+
+    /**
+     * Appends skeleton cards to the grid
+     * @param {number} count - Number of skeletons to append
+     */
+    const appendSkeletons = (count = 20) => {
+        const fragment = document.createDocumentFragment();
+        for (let i = 0; i < count; i++) {
+            fragment.appendChild(createSkeletonCard());
+        }
+        elements.grid.appendChild(fragment);
+    };
+
+    /**
+     * Replaces the first N skeletons with actual asset cards
+     * @param {Array} assets - Array of assets to render
+     */
+    const replaceSkeletonsWithAssets = (assets) => {
+        const skeletons = elements.grid.querySelectorAll(".asset-card--skeleton");
+        const count = Math.min(assets.length, skeletons.length);
+        
+        for (let i = 0; i < count; i++) {
+            const assetCard = createAssetCard(assets[i]);
+            skeletons[i].replaceWith(assetCard);
+        }
+    };
+
+    /**
+     * Removes any remaining skeletons from the grid
+     */
+    const removeRemainingSkeletons = () => {
+        const skeletons = elements.grid.querySelectorAll(".asset-card--skeleton");
+        skeletons.forEach(el => el.remove());
+    };
+
+    /**
+     * Renders skeleton cards to the grid (replaces content)
+     * @param {number} count - Number of skeletons to render
+     */
+    const renderSkeletons = (count = 20) => {
+        elements.grid.innerHTML = "";
+        appendSkeletons(count);
     };
 
     /**
@@ -754,7 +1177,7 @@
             
             // Network or other errors
             log("Validation error:", error);
-            throw new Error("Unable to validate API key. Check your network connection.");
+            throw new Error("Unable to validate API key. Check your network connection. You may be on a newtwork that blocks the API. Consider using a VPN or proxy.");
         }
     };
 
@@ -792,10 +1215,16 @@
                 state.isFirstRun = false;
                 setStatus("API key configured successfully!", "success");
                 await loadHostScript();
-                await Promise.all([fetchFolders(), fetchAssets()]);
+                await fetchFolders();
+                renderWelcomeScreen();
             } else {
                 setStatus("API key updated successfully!", "success");
-                await Promise.all([fetchFolders(), fetchAssets()]);
+                state.cache = {}; // Clear cache on key change
+                await fetchFolders();
+                // Don't reset to welcome screen on simple key update, just refresh current view if needed
+                if (!state.isWelcome) {
+                    syncAssets();
+                }
             }
         } catch (error) {
             console.error(LOG_PREFIX, "API key validation failed:", error);
@@ -819,7 +1248,8 @@
     const bindEvents = () => {
         elements.refreshButton.addEventListener("click", async () => {
             log("Manual refresh requested.");
-            await Promise.all([fetchFolders(), fetchAssets()]);
+            state.cache = {}; // Clear cache
+            await Promise.all([fetchFolders(), syncAssets()]);
         });
 
         elements.settingsButton.addEventListener("click", () => {
@@ -871,8 +1301,15 @@
 
             await loadHostScript();
             
-            // Fetch folders and assets in parallel
-            await Promise.all([fetchFolders(), fetchAssets()]);
+            // Fetch only folders initially
+            await fetchFolders();
+            
+            // Show welcome screen
+            renderWelcomeScreen();
+            
+            // Start syncing assets in background
+            syncAssets();
+            
         } catch (error) {
             console.error(LOG_PREFIX, "Initialization failed", error);
             setStatus(error.message || "Initialization failed.", "error");

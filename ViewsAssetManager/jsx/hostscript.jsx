@@ -124,6 +124,18 @@
             if (!file.exists) {
                 throw new Error("File not found: " + filePath);
             }
+            
+            // Verify file can be opened and has content
+            if (file.length === 0) {
+                throw new Error("File is empty or corrupted: " + filePath);
+            }
+            
+            // Try to open the file to verify it's readable
+            file.encoding = "BINARY";
+            if (!file.open("r")) {
+                throw new Error("File couldn't be opened for reading - it may be locked or corrupted.");
+            }
+            file.close();
 
             if (!app.project) {
                 app.newProject();
@@ -136,7 +148,7 @@
 
             var importOptions = new ImportOptions(file);
             if (!importOptions.canImportAs(ImportAsType.FOOTAGE)) {
-                throw new Error("Unsupported file type.");
+                throw new Error("Unsupported file type or corrupted file.");
             }
 
             importOptions.importAs = ImportAsType.FOOTAGE;
@@ -144,6 +156,12 @@
             undoOpened = true;
 
             var footage = app.project.importFile(importOptions);
+            
+            // Validate that import was successful
+            if (!footage) {
+                throw new Error("Import failed - file may be corrupted or invalid. After Effects could not read the file.");
+            }
+            
             var layer = comp.layers.add(footage);
             centerLayer(layer, comp);
 
