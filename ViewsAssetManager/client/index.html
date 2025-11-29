@@ -47,9 +47,31 @@
 
             <!-- Main Content Area -->
             <main class="main-content">
+                <!-- Search Bar -->
+                <div class="search-container">
+                    <div class="search-input-wrapper">
+                        <svg class="search-icon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                            <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/>
+                        </svg>
+                        <input 
+                            type="text" 
+                            id="searchInput" 
+                            class="search-input" 
+                            placeholder="Search assets..."
+                            autocomplete="off"
+                        />
+                        <button type="button" id="clearSearchBtn" class="search-clear-btn hidden" title="Clear search">
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                                <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div id="searchStats" class="search-stats"></div>
+                </div>
+
                 <div id="spinner" class="spinner spinner--hidden">
                     <div class="spinner__ring"></div>
-                    <p>Loading assets. This will take a while on first boot.</p>
+                    <p>Loading assets...</p>
                 </div>
 
                 <section id="assetGrid" class="asset-grid" aria-live="polite"></section>
@@ -66,7 +88,7 @@
             </div>
             <div class="modal__body">
                 <p class="modal__description">
-                    Enter your Views API key to access assets. You can obtain a key from your Views administrator.
+                    Enter your Views API key to access assets. You should have one in your DM's from the bot. If not, create a support ticket in the <a href="https://discord.gg/views" target="_blank">Views Discord</a>.
                 </p>
                 <form id="apiKeyForm">
                     <div class="form-group">

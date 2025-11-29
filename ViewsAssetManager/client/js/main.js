@@ -17,8 +17,10 @@
         allAssets: [], // All assets from API
         displayedAssets: [], // Currently displayed filtered assets
         filteredAssets: [], // All assets matching current folder
+        searchResults: [], // Assets matching current search
         folders: [],
         selectedFolderId: null, // Start with no folder selected
+        searchQuery: "", // Current search query
         apiKey: "",
         deviceId: null, 
         isFirstRun: false,
@@ -32,6 +34,9 @@
         fetchSession: 0, // ID to track active fetch requests
         cache: {} // Cache for asset requests
     };
+    
+    /** Debounce timer for search */
+    let searchDebounceTimer = null;
 
     /**
      * Filters assets by current folder
@@ -44,6 +49,22 @@
         }
         return allAssets.filter(asset => {
             return String(asset.folderId) === String(state.selectedFolderId);
+        });
+    };
+
+    /**
+     * Filters assets by search query
+     * @param {Array} assets - List of assets to filter
+     * @param {string} query - Search query
+     * @returns {Array} - Filtered assets matching query
+     */
+    const filterAssetsBySearch = (assets, query) => {
+        if (!query) return assets;
+        
+        const lowerQuery = query.toLowerCase();
+        return assets.filter(asset => {
+            const name = (asset.name || asset.id || "").toLowerCase();
+            return name.includes(lowerQuery);
         });
     };
 
@@ -67,28 +88,37 @@
     };
 
     /**
-     * Updates the displayed assets based on selection and pagination
+     * Updates the displayed assets based on selection, search, and pagination
      */
     const updateAssetView = () => {
         if (state.isWelcome) return;
 
         // 1. Filter by folder
-        const filtered = filterAssetsByFolder(state.allAssets);
-        state.filteredAssets = filtered;
+        const folderFiltered = filterAssetsByFolder(state.allAssets);
+        state.filteredAssets = folderFiltered;
         
-        // 2. Slice for display
-        const toShow = filtered.slice(0, state.visibleCount);
+        // 2. Filter by search query
+        const searchFiltered = filterAssetsBySearch(folderFiltered, state.searchQuery);
+        state.searchResults = searchFiltered;
+        
+        // 3. Slice for display
+        const toShow = searchFiltered.slice(0, state.visibleCount);
         state.displayedAssets = toShow;
         
-        // 3. Render
-        UI.renderAssets(toShow, state.selectedFolderId, handleAssetDownload);
+        // 4. Render
+        UI.renderAssets(toShow, state.selectedFolderId, handleAssetDownload, state.searchQuery);
         
-        // 4. Update status
-        if (filtered.length > 0) {
-            UI.setStatus(`${filtered.length} assets found.`, "success");
+        // 5. Update search stats
+        UI.updateSearchStats(toShow.length, searchFiltered.length, state.searchQuery);
+        
+        // 6. Update status (only if no search active)
+        if (!state.searchQuery && searchFiltered.length > 0) {
+            UI.setStatus(`${folderFiltered.length} assets found.`, "success");
+        } else if (state.searchQuery && searchFiltered.length > 0) {
+            UI.setStatus("", "info");
         }
         
-        const hasMore = state.displayedAssets.length < state.filteredAssets.length;
+        const hasMore = state.displayedAssets.length < state.searchResults.length;
         UI.updateLoadMoreButton(hasMore, () => {
             state.visibleCount += 20;
             updateAssetView();
@@ -104,7 +134,7 @@
         state.fetchSession++;
         const currentSession = state.fetchSession;
         
-        UI.setStatus("Syncing assets...", "info");
+        UI.setStatus("Connecting to server...", "info");
         UI.setLoading(true);
         
         try {
@@ -121,6 +151,8 @@
             
             const totalPages = Math.ceil(total / limit);
             
+            UI.setStatus(`Loading assets (${allFetched.length}/${total})...`, "info");
+            
             if (totalPages > 1) {
                 log(`Fetching ${totalPages - 1} more pages...`);
                 const promises = [];
@@ -128,7 +160,18 @@
                     promises.push(API.fetchJson(`/assets?page=${p}&limit=${limit}`));
                 }
                 
-                const results = await Promise.all(promises);
+                // Show progress as pages load
+                let loadedPages = 1;
+                const results = await Promise.all(
+                    promises.map(async (promise) => {
+                        const result = await promise;
+                        loadedPages++;
+                        const loaded = Math.min(loadedPages * limit, total);
+                        UI.setStatus(`Loading assets (${loaded}/${total})...`, "info");
+                        return result;
+                    })
+                );
+                
                 results.forEach(res => {
                     if (res.assets) {
                         allFetched = [...allFetched, ...res.assets];
@@ -145,7 +188,7 @@
             
         } catch (error) {
             console.error("Failed to sync assets", error);
-            UI.setStatus("Failed to sync assets.", "error");
+            UI.setStatus("Failed to sync assets. Check your connection.", "error");
             if (state.fetchSession === currentSession) {
                 UI.renderAssets([], state.selectedFolderId, handleAssetDownload);
             }
@@ -174,8 +217,11 @@
         
         log(`Selected folder: ${targetId}`);
         
+        // Reset pagination and search on folder change
         state.pagination.page = 1;
         state.visibleCount = 20;
+        state.searchQuery = "";
+        UI.clearSearch();
         
         updateAssetView();
     };
@@ -326,10 +372,43 @@
         }
     };
 
+    /**
+     * Handles search input changes with debouncing
+     */
+    const handleSearchInput = () => {
+        UI.updateClearButtonVisibility();
+        
+        // Clear existing debounce timer
+        if (searchDebounceTimer) {
+            clearTimeout(searchDebounceTimer);
+        }
+        
+        // Debounce search to avoid too many updates
+        searchDebounceTimer = setTimeout(() => {
+            const query = UI.getSearchQuery();
+            state.searchQuery = query;
+            state.visibleCount = 20; // Reset pagination on new search
+            updateAssetView();
+            log(`Search query: "${query}"`);
+        }, 200);
+    };
+
+    /**
+     * Handles clearing the search
+     */
+    const handleClearSearch = () => {
+        UI.clearSearch();
+        state.searchQuery = "";
+        state.visibleCount = 20;
+        updateAssetView();
+        log("Search cleared.");
+    };
+
     const bindEvents = () => {
         UI.elements.refreshButton.addEventListener("click", async () => {
             log("Manual refresh requested.");
             state.cache = {}; 
+            handleClearSearch(); // Clear search on refresh
             
             const folders = await API.fetchFolders();
             UI.renderFolders(folders, selectFolder);
@@ -340,6 +419,21 @@
             log("Settings opened.");
             UI.showApiKeyModal(false);
         });
+
+        // Search event listeners
+        if (UI.elements.searchInput) {
+            UI.elements.searchInput.addEventListener("input", handleSearchInput);
+            UI.elements.searchInput.addEventListener("keydown", (e) => {
+                if (e.key === "Escape") {
+                    handleClearSearch();
+                    UI.elements.searchInput.blur();
+                }
+            });
+        }
+        
+        if (UI.elements.clearSearchBtn) {
+            UI.elements.clearSearchBtn.addEventListener("click", handleClearSearch);
+        }
 
         UI.elements.apiKeyForm.addEventListener("submit", handleApiKeySubmit);
 

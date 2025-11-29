@@ -20,6 +20,9 @@
         refreshButton: document.getElementById("refreshButton"),
         settingsButton: document.getElementById("settingsButton"),
         folderList: document.getElementById("folderList"),
+        searchInput: document.getElementById("searchInput"),
+        clearSearchBtn: document.getElementById("clearSearchBtn"),
+        searchStats: document.getElementById("searchStats"),
         apiKeyModal: document.getElementById("apiKeyModal"),
         apiKeyForm: document.getElementById("apiKeyForm"),
         apiKeyInput: document.getElementById("apiKeyInput"),
@@ -251,23 +254,63 @@
      * @param {Array} assets - Array of asset objects to render
      * @param {string} selectedFolderId - ID of the current folder
      * @param {Function} onImport - Callback for import
+     * @param {string} [searchQuery] - Optional search query for empty state message
      */
-    const renderAssets = (assets, selectedFolderId, onImport) => {
+    const renderAssets = (assets, selectedFolderId, onImport, searchQuery = "") => {
         elements.grid.innerHTML = "";
 
         if (!assets.length) {
-            const empty = document.createElement("p");
+            const empty = document.createElement("div");
             empty.className = "asset-grid__empty";
-            empty.textContent = selectedFolderId === "all" 
-                ? "No assets available." 
-                : "No assets in this folder.";
+            
+            // Add icon
+            const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+            icon.setAttribute("class", "asset-grid__empty-icon");
+            icon.setAttribute("viewBox", "0 0 24 24");
+            icon.setAttribute("fill", "currentColor");
+            const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            
+            if (searchQuery) {
+                // Search icon for no results
+                path.setAttribute("d", "M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z");
+            } else {
+                // Folder icon for empty folder
+                path.setAttribute("d", "M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z");
+            }
+            icon.appendChild(path);
+            empty.appendChild(icon);
+            
+            const text = document.createElement("p");
+            if (searchQuery) {
+                text.textContent = `No assets found for "${searchQuery}"`;
+            } else if (selectedFolderId === "all") {
+                text.textContent = "No assets available.";
+            } else {
+                text.textContent = "No assets in this folder.";
+            }
+            text.style.margin = "0";
+            empty.appendChild(text);
+            
+            if (searchQuery) {
+                const hint = document.createElement("p");
+                hint.textContent = "Try a different search term";
+                hint.style.margin = "4px 0 0 0";
+                hint.style.fontSize = "12px";
+                hint.style.opacity = "0.7";
+                empty.appendChild(hint);
+            }
+            
             elements.grid.appendChild(empty);
             return;
         }
 
         const fragment = document.createDocumentFragment();
-        assets.forEach((asset) => {
-            fragment.appendChild(createAssetCard(asset, onImport));
+        assets.forEach((asset, index) => {
+            const card = createAssetCard(asset, onImport);
+            // Staggered animation delay (capped at 500ms max total)
+            const delay = Math.min(index * 30, 500);
+            card.style.animationDelay = `${delay}ms`;
+            fragment.appendChild(card);
         });
         elements.grid.appendChild(fragment);
         log(`Rendered ${assets.length} assets.`);
@@ -379,11 +422,6 @@
                 btn.addEventListener("click", onClick);
                 
                 mainContent.appendChild(btn);
-            } else {
-                // Clone and replace to remove old event listeners if they stack up
-                // Or better: just ensure we don't attach multiple listeners or handle it in main
-                // For now, simple display toggle is safer if listener is stable.
-                // But the callback might change if state changes? No, onClick usually refers to a stable function in main.
             }
             
             btn.style.display = "block";
@@ -392,6 +430,59 @@
                 btn.style.display = "none";
             }
         }
+    };
+
+    /**
+     * Updates the search statistics display
+     * @param {number} shown - Number of assets currently shown
+     * @param {number} total - Total number of assets matching search
+     * @param {string} query - The search query (empty if no search)
+     */
+    const updateSearchStats = (shown, total, query = "") => {
+        if (!elements.searchStats) return;
+        
+        if (!query) {
+            elements.searchStats.textContent = total > 0 ? `${total} assets available` : "";
+            elements.searchStats.classList.remove("search-stats--active");
+            return;
+        }
+        
+        elements.searchStats.classList.add("search-stats--active");
+        if (total === 0) {
+            elements.searchStats.textContent = `No results for "${query}"`;
+        } else {
+            elements.searchStats.textContent = `Showing ${shown} of ${total} results for "${query}"`;
+        }
+    };
+
+    /**
+     * Clears the search input
+     */
+    const clearSearch = () => {
+        if (elements.searchInput) {
+            elements.searchInput.value = "";
+        }
+        if (elements.clearSearchBtn) {
+            elements.clearSearchBtn.classList.add("hidden");
+        }
+        updateSearchStats(0, 0, "");
+    };
+
+    /**
+     * Gets the current search query
+     * @returns {string} The search query
+     */
+    const getSearchQuery = () => {
+        return elements.searchInput ? elements.searchInput.value.trim().toLowerCase() : "";
+    };
+
+    /**
+     * Updates the clear button visibility based on input value
+     */
+    const updateClearButtonVisibility = () => {
+        if (!elements.clearSearchBtn || !elements.searchInput) return;
+        const hasValue = elements.searchInput.value.trim().length > 0;
+        elements.clearSearchBtn.classList.toggle("hidden", !hasValue);
     };
     
     // Expose methods
@@ -409,7 +500,11 @@
         hideApiKeyModal,
         showApiKeyError,
         toggleApiKeyVisibility,
-        updateLoadMoreButton
+        updateLoadMoreButton,
+        updateSearchStats,
+        clearSearch,
+        getSearchQuery,
+        updateClearButtonVisibility
     };
 
 })(window);
