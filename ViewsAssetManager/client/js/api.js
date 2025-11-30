@@ -14,6 +14,9 @@
     const API_BASE_URL = "https://api.viewseditors.com";
     const API_KEY_STORAGE_KEY = "views_asset_manager_api_key";
     
+    /** Expected API version - update this when a new version is required */
+    const EXPECTED_VERSION = "1.0.0";
+    
     let currentApiKey = "";
     let cachedDeviceId = null;
 
@@ -259,6 +262,43 @@
         return fetchJson(`/assets/${encodedId}/download`);
     };
 
+    /**
+     * Fetches the API version from the server
+     * @returns {Promise<{version: string, major: number, minor: number, patch: number}>} Version info
+     */
+    const fetchVersion = async () => {
+        log("Fetching API version...");
+        const response = await fetch(`${API_BASE_URL}/version`, {
+            method: "GET",
+            cache: "no-cache",
+            headers: {
+                "Content-Type": "application/json",
+                Accept: "application/json"
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error(`Failed to fetch version: ${response.status}`);
+        }
+
+        return response.json();
+    };
+
+    /**
+     * Gets the expected API version
+     * @returns {string} Expected version string
+     */
+    const getExpectedVersion = () => EXPECTED_VERSION;
+
+    /**
+     * Compares version strings to check if update is needed
+     * @param {string} serverVersion - Version from the server
+     * @returns {boolean} True if versions don't match (update needed)
+     */
+    const isUpdateRequired = (serverVersion) => {
+        return serverVersion !== EXPECTED_VERSION;
+    };
+
     global.Views.API = {
         setApiKey,
         getStoredApiKey,
@@ -267,7 +307,10 @@
         validateApiKey,
         fetchJson,
         fetchFolders,
-        requestAssetDownload
+        requestAssetDownload,
+        fetchVersion,
+        getExpectedVersion,
+        isUpdateRequired
     };
 
 })(window);

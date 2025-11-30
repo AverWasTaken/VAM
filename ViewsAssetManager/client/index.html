@@ -14,6 +14,7 @@
             <div class="panel__branding">
                 <img src="img/logo.png" alt="Views Logo" class="panel__logo">
                 <h1>Views Asset Manager</h1>
+                <span id="versionBadge" class="version-indicator" title="Extension version">v-</span>
             </div>
             <div class="panel__header-actions">
                 <button id="feedbackButton" class="btn btn--ghost btn--icon hidden" type="button" title="Send Feedback">
@@ -249,6 +250,50 @@
             <div id="loadingProgress" class="progress-bar-container hidden">
                 <div id="loadingProgressBar" class="progress-bar-fill" style="width: 0%"></div>
             </div>
+        </div>
+    </div>
+
+    <!-- Update Required Modal -->
+    <div id="updateModal" class="modal modal--hidden">
+        <div class="modal__overlay"></div>
+        <div class="modal__content update-modal">
+            <div class="update-modal__icon">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+            </div>
+            <h2 class="update-modal__title">Update Available</h2>
+            <p class="update-modal__description">
+                A new version of Views Asset Manager is available. Please update to continue using the extension.
+            </p>
+            <div class="update-modal__versions">
+                <div class="version-badge version-badge--current">
+                    <span class="version-badge__label">Current</span>
+                    <span id="currentVersion" class="version-badge__value">-</span>
+                </div>
+                <svg class="version-arrow" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
+                </svg>
+                <div class="version-badge version-badge--new">
+                    <span class="version-badge__label">New</span>
+                    <span id="newVersion" class="version-badge__value">-</span>
+                </div>
+            </div>
+            <div class="modal__actions update-modal__actions">
+                <button type="button" id="updateButton" class="btn btn--primary btn--update">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                    Update Now
+                </button>
+            </div>
+            <p class="update-modal__note">
+                This will download and install the latest version automatically.
+            </p>
         </div>
     </div>
 

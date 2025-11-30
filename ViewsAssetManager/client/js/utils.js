@@ -64,6 +64,209 @@
         log("Host script loaded.");
     };
 
+    /**
+     * Executes a command and returns a promise
+     * @param {string} command - Command to execute
+     * @param {Object} options - exec options
+     * @returns {Promise<{stdout: string, stderr: string}>}
+     */
+    const execPromise = (command, options = {}) => {
+        const { exec } = require("child_process");
+        return new Promise((resolve, reject) => {
+            exec(command, { shell: "cmd.exe", ...options }, (error, stdout, stderr) => {
+                if (error) {
+                    reject({ error, stdout, stderr });
+                } else {
+                    resolve({ stdout, stderr });
+                }
+            });
+        });
+    };
+
+    /**
+     * Updates the extension by cloning the latest version from GitHub
+     * @param {Function} onProgress - Optional callback for progress updates
+     * @returns {Promise<void>}
+     */
+    const runUpdateScript = async (onProgress) => {
+        const path = require("path");
+        const fs = require("fs");
+        
+        const repoUrl = "https://github.com/AverWasTaken/views-ae-extension.git";
+        const tempDir = path.join(process.env.TEMP || "/tmp", "ViewsAssetManager_Update");
+        const cepDir = "C:\\Program Files (x86)\\Common Files\\Adobe\\CEP\\extensions";
+        const extensionDest = path.join(cepDir, "ViewsAssetManager");
+        
+        log("Starting extension update...");
+        log("Temp dir:", tempDir);
+        log("Destination:", extensionDest);
+        
+        try {
+            // Step 1: Check if git is installed
+            if (onProgress) onProgress("Checking git installation...");
+            try {
+                await execPromise("git --version");
+                log("Git is installed");
+            } catch (e) {
+                throw new Error("Git is not installed. Please install Git from https://git-scm.com");
+            }
+            
+            // Step 2: Clean up old temp folder
+            if (onProgress) onProgress("Preparing...");
+            if (fs.existsSync(tempDir)) {
+                log("Removing old temp folder...");
+                await execPromise(`rmdir /s /q "${tempDir}"`);
+            }
+            
+            // Step 3: Clone the repository
+            if (onProgress) onProgress("Downloading from GitHub...");
+            log("Cloning repository...");
+            try {
+                const { stdout, stderr } = await execPromise(`git clone --depth 1 --progress "${repoUrl}" "${tempDir}"`, {
+                    timeout: 60000 // 60 second timeout
+                });
+                log("Clone stdout:", stdout);
+                log("Clone stderr:", stderr);
+            } catch (e) {
+                log("Clone error:", e.error?.message, e.stderr);
+                throw new Error("Failed to download from GitHub. Check your internet connection.");
+            }
+            
+            // Step 4: Verify clone succeeded
+            const clonedExtPath = path.join(tempDir, "ViewsAssetManager");
+            if (!fs.existsSync(clonedExtPath)) {
+                throw new Error("Download failed - extension folder not found in repository");
+            }
+            
+            // Verify key files exist in the cloned repo
+            const manifestPath = path.join(clonedExtPath, "CSXS", "manifest.xml");
+            if (!fs.existsSync(manifestPath)) {
+                throw new Error("Download corrupted - manifest.xml not found");
+            }
+            log("Clone verified - files exist");
+            
+            // Step 5: Install with admin privileges using PowerShell
+            if (onProgress) onProgress("Requesting admin access...");
+            log("Requesting admin privileges for installation...");
+            
+            // Write a temporary PowerShell script file
+            const scriptPath = path.join(process.env.TEMP, "ViewsUpdate_Install.ps1");
+            const scriptContent = `
+$ErrorActionPreference = 'Stop'
+$src = '${clonedExtPath.replace(/\\/g, "\\\\")}'
+$dest = '${extensionDest.replace(/\\/g, "\\\\")}'
+$logFile = '${path.join(process.env.TEMP, "ViewsUpdate_Result.txt").replace(/\\/g, "\\\\")}'
+
+try {
+    # Remove old extension if exists
+    if (Test-Path $dest) {
+        Remove-Item -Path $dest -Recurse -Force -ErrorAction Stop
+    }
+    # Copy new extension
+    Copy-Item -Path $src -Destination $dest -Recurse -Force -ErrorAction Stop
+    # Write success
+    'SUCCESS' | Out-File -FilePath $logFile -Encoding UTF8
+} catch {
+    # Write error
+    "ERROR: $_" | Out-File -FilePath $logFile -Encoding UTF8
+}
+`;
+            
+            fs.writeFileSync(scriptPath, scriptContent, "utf8");
+            log("Install script written to:", scriptPath);
+            
+            // Delete any existing result file
+            const resultPath = path.join(process.env.TEMP, "ViewsUpdate_Result.txt");
+            if (fs.existsSync(resultPath)) {
+                fs.unlinkSync(resultPath);
+            }
+            
+            if (onProgress) onProgress("Installing (approve admin prompt)...");
+            
+            // Run PowerShell with elevation - this will show UAC prompt
+            const elevateCmd = `powershell -Command "Start-Process powershell -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File \\"${scriptPath}\\"' -Verb RunAs -Wait"`;
+            log("Running elevated command:", elevateCmd);
+            
+            try {
+                await execPromise(elevateCmd, { timeout: 120000 }); // 2 min timeout for user to click UAC
+                log("Elevated command completed");
+            } catch (e) {
+                log("Elevation error:", e.error?.message, e.stderr);
+                // Check if result file was created anyway (UAC might have succeeded even if exec reports error)
+                if (!fs.existsSync(resultPath)) {
+                    throw new Error("Admin prompt was cancelled or failed to appear. Try again.");
+                }
+            }
+            
+            // Check the result file
+            if (onProgress) onProgress("Checking result...");
+            
+            // Wait a moment for file to be written
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            if (!fs.existsSync(resultPath)) {
+                throw new Error("Installation did not complete. The admin prompt may have been cancelled.");
+            }
+            
+            const result = fs.readFileSync(resultPath, "utf8").trim();
+            log("Install result:", result);
+            
+            // Cleanup script and result files
+            try {
+                fs.unlinkSync(scriptPath);
+                fs.unlinkSync(resultPath);
+            } catch (e) {
+                // Ignore cleanup errors
+            }
+            
+            if (result.startsWith("ERROR:")) {
+                throw new Error("Installation failed: " + result.substring(7));
+            }
+            
+            if (result !== "SUCCESS") {
+                throw new Error("Installation returned unexpected result: " + result);
+            }
+            
+            log("Admin install completed successfully");
+            
+            // Step 6: Verify installation
+            if (onProgress) onProgress("Verifying installation...");
+            
+            // Wait a moment for filesystem to sync
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            const installedManifest = path.join(extensionDest, "CSXS", "manifest.xml");
+            if (!fs.existsSync(installedManifest)) {
+                throw new Error("Installation verification failed - files not copied correctly. Try again.");
+            }
+            log("Installation verified - manifest exists at destination");
+            
+            // Step 7: Cleanup temp folder
+            if (onProgress) onProgress("Cleaning up...");
+            try {
+                await execPromise(`rmdir /s /q "${tempDir}"`);
+            } catch (e) {
+                log("Warning: Could not cleanup temp folder:", e.stderr);
+                // Not critical, continue
+            }
+            
+            log("Update completed successfully!");
+            if (onProgress) onProgress("Update complete!");
+            
+        } catch (error) {
+            log("Update failed:", error.message);
+            // Try to cleanup on failure
+            try {
+                if (fs.existsSync(tempDir)) {
+                    await execPromise(`rmdir /s /q "${tempDir}"`);
+                }
+            } catch (e) {
+                // Ignore cleanup errors
+            }
+            throw error;
+        }
+    };
+
     global.Views.Utils = {
         log,
         escapeForEval,
@@ -71,6 +274,7 @@
         getDisplayName,
         evalScript,
         loadHostScript,
+        runUpdateScript,
         csInterface
     };
 

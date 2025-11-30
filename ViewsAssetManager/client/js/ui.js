@@ -60,7 +60,14 @@
         cancelApiKeyButton: document.getElementById("cancelApiKeyButton"),
         toggleApiKeyVisibility: document.getElementById("toggleApiKeyVisibility"),
         showKeyIcon: document.getElementById("showKeyIcon"),
-        hideKeyIcon: document.getElementById("hideKeyIcon")
+        hideKeyIcon: document.getElementById("hideKeyIcon"),
+        // Update modal
+        updateModal: document.getElementById("updateModal"),
+        updateButton: document.getElementById("updateButton"),
+        currentVersion: document.getElementById("currentVersion"),
+        newVersion: document.getElementById("newVersion"),
+        // Version badge
+        versionBadge: document.getElementById("versionBadge")
     };
 
     const LoadingOverlay = {
@@ -733,6 +740,142 @@
         elements.feedbackSuccess.classList.remove("form-success--hidden");
         elements.feedbackError.classList.add("form-error--hidden");
     };
+
+    /**
+     * Shows the update required modal
+     * @param {string} currentVer - Current extension version
+     * @param {string} newVer - New available version
+     * @param {Function} onUpdate - Callback when update button is clicked, receives progress callback
+     */
+    const showUpdateModal = (currentVer, newVer, onUpdate) => {
+        if (!elements.updateModal) return;
+        
+        elements.currentVersion.textContent = currentVer;
+        elements.newVersion.textContent = newVer;
+        elements.updateModal.classList.remove("modal--hidden");
+        
+        // Remove any existing listeners and add new one
+        const updateBtn = elements.updateButton;
+        const newBtn = updateBtn.cloneNode(true);
+        updateBtn.parentNode.replaceChild(newBtn, updateBtn);
+        elements.updateButton = newBtn;
+        
+        const noteEl = elements.updateModal.querySelector(".update-modal__note");
+        
+        newBtn.addEventListener("click", async () => {
+            newBtn.disabled = true;
+            newBtn.innerHTML = `
+                <svg class="spinner__ring" width="16" height="16" viewBox="0 0 40 40" style="animation: spin 0.8s linear infinite;">
+                    <circle cx="20" cy="20" r="17" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="80 30"/>
+                </svg>
+                <span id="updateStatus">Updating...</span>
+            `;
+            
+            const statusSpan = newBtn.querySelector("#updateStatus");
+            
+            const onProgress = (message) => {
+                if (statusSpan) statusSpan.textContent = message;
+            };
+            
+            try {
+                await onUpdate(onProgress);
+                
+                // Success - show restart message
+                newBtn.innerHTML = `
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                    Updated!
+                `;
+                newBtn.style.backgroundColor = "#2f6f46";
+                newBtn.style.borderColor = "#2f6f46";
+                
+                // Update the modal to show save/restart prompt
+                const titleEl = elements.updateModal.querySelector(".update-modal__title");
+                const descEl = elements.updateModal.querySelector(".update-modal__description");
+                const versionsEl = elements.updateModal.querySelector(".update-modal__versions");
+                const iconEl = elements.updateModal.querySelector(".update-modal__icon");
+                
+                if (titleEl) titleEl.textContent = "Update Complete!";
+                if (descEl) {
+                    descEl.innerHTML = `
+                        <strong style="color: #bff5d5;">Save your project</strong> and restart After Effects to use the new version.
+                    `;
+                }
+                if (versionsEl) versionsEl.style.display = "none";
+                if (iconEl) {
+                    iconEl.style.background = "linear-gradient(135deg, rgba(47, 111, 70, 0.3) 0%, rgba(47, 111, 70, 0.1) 100%)";
+                    iconEl.style.color = "#bff5d5";
+                    iconEl.innerHTML = `
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                    `;
+                }
+                
+                if (noteEl) {
+                    noteEl.innerHTML = `
+                        <span style="color: var(--ae-text-secondary);">
+                            Go to <strong>File → Save</strong> then close and reopen After Effects.
+                        </span>
+                    `;
+                }
+            } catch (error) {
+                // Error - show error message
+                newBtn.innerHTML = `
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                    Update Failed
+                `;
+                newBtn.style.backgroundColor = "#5a2a2a";
+                newBtn.style.borderColor = "#5a2a2a";
+                newBtn.disabled = false;
+                
+                if (noteEl) {
+                    noteEl.innerHTML = `<span style="color: #ffbaba;">Error: ${error.message || "Unknown error"}</span><br>Please update manually or try again.`;
+                }
+            }
+        });
+        
+        log("Showing update modal");
+    };
+
+    /**
+     * Hides the update modal
+     */
+    const hideUpdateModal = () => {
+        if (!elements.updateModal) return;
+        elements.updateModal.classList.add("modal--hidden");
+    };
+
+    /**
+     * Sets the version badge display
+     * @param {string} version - Version string to display
+     * @param {boolean} isOutdated - Whether the version is outdated
+     * @param {Function} [onClick] - Optional click handler for outdated state
+     */
+    const setVersionBadge = (version, isOutdated = false, onClick = null) => {
+        if (!elements.versionBadge) return;
+        
+        elements.versionBadge.textContent = `v${version}`;
+        elements.versionBadge.classList.toggle("version-indicator--outdated", isOutdated);
+        
+        if (isOutdated) {
+            elements.versionBadge.title = "Update available! Click to update.";
+            if (onClick) {
+                elements.versionBadge.style.cursor = "pointer";
+                elements.versionBadge.onclick = onClick;
+            }
+        } else {
+            elements.versionBadge.title = `Extension version ${version}`;
+            elements.versionBadge.style.cursor = "default";
+            elements.versionBadge.onclick = null;
+        }
+        
+        log(`Version badge set to: ${version} (outdated: ${isOutdated})`);
+    };
     
     // Expose methods
     global.Views.UI = {
@@ -765,7 +908,10 @@
         showFeedbackModal,
         hideFeedbackModal,
         showFeedbackError,
-        showFeedbackSuccess
+        showFeedbackSuccess,
+        showUpdateModal,
+        hideUpdateModal,
+        setVersionBadge
     };
 
 })(window);

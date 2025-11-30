@@ -814,10 +814,69 @@
         }
     };
 
+    /**
+     * Shows the update modal with the update handler
+     * @param {string} currentVer - Current extension version
+     * @param {string} newVer - New available version
+     */
+    const showUpdatePrompt = (currentVer, newVer) => {
+        UI.showUpdateModal(currentVer, newVer, async (onProgress) => {
+            await Utils.runUpdateScript(onProgress);
+        });
+    };
+
+    /**
+     * Checks if the extension version matches the API version
+     * @returns {Promise<boolean>} True if versions match, false if update required
+     */
+    const checkVersion = async () => {
+        try {
+            log("Checking extension version...");
+            const versionInfo = await API.fetchVersion();
+            const expectedVersion = API.getExpectedVersion();
+            
+            log(`Server version: ${versionInfo.version}, Expected: ${expectedVersion}`);
+            
+            if (API.isUpdateRequired(versionInfo.version)) {
+                log("Update required - showing update modal");
+                
+                // Set version badge as outdated (clickable to reopen modal)
+                UI.setVersionBadge(expectedVersion, true, () => {
+                    showUpdatePrompt(expectedVersion, versionInfo.version);
+                });
+                
+                // Show update modal
+                showUpdatePrompt(expectedVersion, versionInfo.version);
+                return false;
+            }
+            
+            // Set version badge as current
+            UI.setVersionBadge(expectedVersion, false);
+            
+            log("Version check passed");
+            return true;
+        } catch (error) {
+            // If version check fails, log it but continue (graceful degradation)
+            console.error("Version check failed:", error);
+            log("Version check failed, continuing anyway...");
+            
+            // Still show the expected version
+            UI.setVersionBadge(API.getExpectedVersion(), false);
+            return true;
+        }
+    };
+
     const init = async () => {
         bindEvents();
         try {
             log("Initializing panel UI.");
+            
+            // Check version first
+            const versionOk = await checkVersion();
+            if (!versionOk) {
+                UI.setLoading(false);
+                return; // Stop initialization if update is required
+            }
             
             const storedKey = API.getStoredApiKey();
             if (storedKey) {
