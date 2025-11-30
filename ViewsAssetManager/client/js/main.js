@@ -42,6 +42,12 @@
     
     /** Debounce timer for search */
     let searchDebounceTimer = null;
+    
+    /** Interval ID for periodic version checks */
+    let versionCheckInterval = null;
+    
+    /** How often to check for updates (5 minutes) */
+    const VERSION_CHECK_INTERVAL_MS = 5 * 60 * 1000;
 
     /**
      * Filters assets by current folder
@@ -675,6 +681,12 @@
             handleClearSearch(); // Clear search on refresh
             clearSelection(); // Clear selection on refresh
             
+            // Check version on refresh
+            const versionOk = await checkVersion();
+            if (!versionOk) {
+                return; // Stop if update is required
+            }
+            
             const folders = await API.fetchFolders();
             UI.renderFolders(folders, selectFolder);
             await syncAssets();
@@ -826,6 +838,23 @@
     };
 
     /**
+     * Starts the periodic version check interval
+     */
+    const startVersionCheckInterval = () => {
+        // Clear any existing interval
+        if (versionCheckInterval) {
+            clearInterval(versionCheckInterval);
+        }
+        
+        log(`Starting periodic version check (every ${VERSION_CHECK_INTERVAL_MS / 1000 / 60} minutes)`);
+        
+        versionCheckInterval = setInterval(async () => {
+            log("Running periodic version check...");
+            await checkVersion();
+        }, VERSION_CHECK_INTERVAL_MS);
+    };
+
+    /**
      * Checks if the extension version matches the API version
      * @returns {Promise<boolean>} True if versions match, false if update required
      */
@@ -900,6 +929,9 @@
             UI.renderWelcomeScreen();
             
             syncAssets();
+            
+            // Start periodic version check (every 5 minutes)
+            startVersionCheckInterval();
             
         } catch (error) {
             console.error("Initialization failed", error);

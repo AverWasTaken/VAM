@@ -65,6 +65,15 @@
     };
 
     /**
+     * Detects if running on Windows or Mac
+     * @returns {string} "win" or "mac"
+     */
+    const getPlatform = () => {
+        const os = require("os");
+        return os.platform() === "darwin" ? "mac" : "win";
+    };
+
+    /**
      * Executes a command and returns a promise
      * @param {string} command - Command to execute
      * @param {Object} options - exec options
@@ -72,8 +81,11 @@
      */
     const execPromise = (command, options = {}) => {
         const { exec } = require("child_process");
+        const platform = getPlatform();
+        const shell = platform === "mac" ? "/bin/bash" : "cmd.exe";
+        
         return new Promise((resolve, reject) => {
-            exec(command, { shell: "cmd.exe", ...options }, (error, stdout, stderr) => {
+            exec(command, { shell, ...options }, (error, stdout, stderr) => {
                 if (error) {
                     reject({ error, stdout, stderr });
                 } else {
@@ -91,13 +103,20 @@
     const runUpdateScript = async (onProgress) => {
         const path = require("path");
         const fs = require("fs");
+        const os = require("os");
         
+        const platform = getPlatform();
         const repoUrl = "https://github.com/AverWasTaken/views-ae-extension.git";
-        const tempDir = path.join(process.env.TEMP || "/tmp", "ViewsAssetManager_Update");
-        const cepDir = "C:\\Program Files (x86)\\Common Files\\Adobe\\CEP\\extensions";
+        const tempDir = path.join(os.tmpdir(), "ViewsAssetManager_Update");
+        
+        // Platform-specific paths
+        const cepDir = platform === "mac" 
+            ? "/Library/Application Support/Adobe/CEP/extensions"
+            : "C:\\Program Files (x86)\\Common Files\\Adobe\\CEP\\extensions";
         const extensionDest = path.join(cepDir, "ViewsAssetManager");
         
         log("Starting extension update...");
+        log("Platform:", platform);
         log("Temp dir:", tempDir);
         log("Destination:", extensionDest);
         
@@ -115,7 +134,8 @@
             if (onProgress) onProgress("Preparing...");
             if (fs.existsSync(tempDir)) {
                 log("Removing old temp folder...");
-                await execPromise(`rmdir /s /q "${tempDir}"`);
+                const rmCmd = platform === "mac" ? `rm -rf "${tempDir}"` : `rmdir /s /q "${tempDir}"`;
+                await execPromise(rmCmd);
             }
             
             // Step 3: Clone the repository
@@ -145,17 +165,61 @@
             }
             log("Clone verified - files exist");
             
-            // Step 5: Install with admin privileges using PowerShell
+            // Step 5: Install with admin privileges (platform-specific)
             if (onProgress) onProgress("Requesting admin access...");
             log("Requesting admin privileges for installation...");
             
-            // Write a temporary PowerShell script file
-            const scriptPath = path.join(process.env.TEMP, "ViewsUpdate_Install.ps1");
-            const scriptContent = `
+            const resultPath = path.join(os.tmpdir(), "ViewsUpdate_Result.txt");
+            
+            // Delete any existing result file
+            if (fs.existsSync(resultPath)) {
+                fs.unlinkSync(resultPath);
+            }
+            
+            if (platform === "mac") {
+                // Mac: Use AppleScript to request admin password
+                const shellScript = `
+#!/bin/bash
+rm -rf "${extensionDest}" 2>/dev/null
+cp -R "${clonedExtPath}" "${extensionDest}"
+if [ -f "${extensionDest}/CSXS/manifest.xml" ]; then
+    echo "SUCCESS" > "${resultPath}"
+else
+    echo "ERROR: Copy failed" > "${resultPath}"
+fi
+`;
+                const scriptPath = path.join(os.tmpdir(), "ViewsUpdate_Install.sh");
+                fs.writeFileSync(scriptPath, shellScript, { mode: 0o755 });
+                log("Install script written to:", scriptPath);
+                
+                if (onProgress) onProgress("Installing (enter password)...");
+                
+                // Use AppleScript to run with admin privileges - shows password dialog
+                const appleScript = `do shell script "bash '${scriptPath}'" with administrator privileges`;
+                const elevateCmd = `osascript -e '${appleScript.replace(/'/g, "'\\''")}'`;
+                log("Running elevated command via AppleScript");
+                
+                try {
+                    await execPromise(elevateCmd, { timeout: 120000 });
+                    log("Elevated command completed");
+                } catch (e) {
+                    log("Elevation error:", e.error?.message, e.stderr);
+                    if (!fs.existsSync(resultPath)) {
+                        throw new Error("Admin prompt was cancelled. Please try again and enter your password.");
+                    }
+                }
+                
+                // Cleanup script
+                try { fs.unlinkSync(scriptPath); } catch (e) { /* ignore */ }
+                
+            } else {
+                // Windows: Use PowerShell with UAC elevation
+                const scriptPath = path.join(os.tmpdir(), "ViewsUpdate_Install.ps1");
+                const scriptContent = `
 $ErrorActionPreference = 'Stop'
 $src = '${clonedExtPath.replace(/\\/g, "\\\\")}'
 $dest = '${extensionDest.replace(/\\/g, "\\\\")}'
-$logFile = '${path.join(process.env.TEMP, "ViewsUpdate_Result.txt").replace(/\\/g, "\\\\")}'
+$logFile = '${resultPath.replace(/\\/g, "\\\\")}'
 
 try {
     # Remove old extension if exists
@@ -171,31 +235,29 @@ try {
     "ERROR: $_" | Out-File -FilePath $logFile -Encoding UTF8
 }
 `;
-            
-            fs.writeFileSync(scriptPath, scriptContent, "utf8");
-            log("Install script written to:", scriptPath);
-            
-            // Delete any existing result file
-            const resultPath = path.join(process.env.TEMP, "ViewsUpdate_Result.txt");
-            if (fs.existsSync(resultPath)) {
-                fs.unlinkSync(resultPath);
-            }
-            
-            if (onProgress) onProgress("Installing (approve admin prompt)...");
-            
-            // Run PowerShell with elevation - this will show UAC prompt
-            const elevateCmd = `powershell -Command "Start-Process powershell -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File \\"${scriptPath}\\"' -Verb RunAs -Wait"`;
-            log("Running elevated command:", elevateCmd);
-            
-            try {
-                await execPromise(elevateCmd, { timeout: 120000 }); // 2 min timeout for user to click UAC
-                log("Elevated command completed");
-            } catch (e) {
-                log("Elevation error:", e.error?.message, e.stderr);
-                // Check if result file was created anyway (UAC might have succeeded even if exec reports error)
-                if (!fs.existsSync(resultPath)) {
-                    throw new Error("Admin prompt was cancelled or failed to appear. Try again.");
+                
+                fs.writeFileSync(scriptPath, scriptContent, "utf8");
+                log("Install script written to:", scriptPath);
+                
+                if (onProgress) onProgress("Installing (approve admin prompt)...");
+                
+                // Run PowerShell with elevation - this will show UAC prompt
+                const elevateCmd = `powershell -Command "Start-Process powershell -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File \\"${scriptPath}\\"' -Verb RunAs -Wait"`;
+                log("Running elevated command:", elevateCmd);
+                
+                try {
+                    await execPromise(elevateCmd, { timeout: 120000 }); // 2 min timeout for user to click UAC
+                    log("Elevated command completed");
+                } catch (e) {
+                    log("Elevation error:", e.error?.message, e.stderr);
+                    // Check if result file was created anyway (UAC might have succeeded even if exec reports error)
+                    if (!fs.existsSync(resultPath)) {
+                        throw new Error("Admin prompt was cancelled or failed to appear. Try again.");
+                    }
                 }
+                
+                // Cleanup script
+                try { fs.unlinkSync(scriptPath); } catch (e) { /* ignore */ }
             }
             
             // Check the result file
@@ -211,13 +273,8 @@ try {
             const result = fs.readFileSync(resultPath, "utf8").trim();
             log("Install result:", result);
             
-            // Cleanup script and result files
-            try {
-                fs.unlinkSync(scriptPath);
-                fs.unlinkSync(resultPath);
-            } catch (e) {
-                // Ignore cleanup errors
-            }
+            // Cleanup result file
+            try { fs.unlinkSync(resultPath); } catch (e) { /* ignore */ }
             
             if (result.startsWith("ERROR:")) {
                 throw new Error("Installation failed: " + result.substring(7));
@@ -244,7 +301,8 @@ try {
             // Step 7: Cleanup temp folder
             if (onProgress) onProgress("Cleaning up...");
             try {
-                await execPromise(`rmdir /s /q "${tempDir}"`);
+                const rmCmd = platform === "mac" ? `rm -rf "${tempDir}"` : `rmdir /s /q "${tempDir}"`;
+                await execPromise(rmCmd);
             } catch (e) {
                 log("Warning: Could not cleanup temp folder:", e.stderr);
                 // Not critical, continue
@@ -258,7 +316,8 @@ try {
             // Try to cleanup on failure
             try {
                 if (fs.existsSync(tempDir)) {
-                    await execPromise(`rmdir /s /q "${tempDir}"`);
+                    const rmCmd = platform === "mac" ? `rm -rf "${tempDir}"` : `rmdir /s /q "${tempDir}"`;
+                    await execPromise(rmCmd);
                 }
             } catch (e) {
                 // Ignore cleanup errors
