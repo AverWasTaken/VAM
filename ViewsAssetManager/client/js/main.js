@@ -39,7 +39,9 @@
         },
         visibleCount: 20, // How many assets to show (for "Load More")
         fetchSession: 0, // ID to track active fetch requests
-        cache: {} // Cache for asset requests
+        cache: {}, // Cache for asset requests
+        preloadPromise: null, // Promise for background asset preloading
+        preloadFoldersPromise: null // Promise for background folder preloading
     };
     
     /** Debounce timer for search */
@@ -52,11 +54,100 @@
     const VERSION_CHECK_INTERVAL_MS = 5 * 60 * 1000;
 
     /**
-     * Loads folders from API and builds lookup map
+     * Silently preloads all assets in background without UI updates.
+     * Called as early as possible after API key is available.
+     * @returns {Promise<Array|null>} Array of assets or null on failure
+     */
+    const preloadAssetsInBackground = async () => {
+        try {
+            log("Background preload: Starting asset fetch...");
+            const startTime = Date.now();
+            
+            let page = 1;
+            const limit = 100;
+            let allFetched = [];
+            
+            // Fetch first page
+            let data = await API.fetchJson(`/assets?page=${page}&limit=${limit}`);
+            allFetched = [...(data.assets || [])];
+            const total = data.total || 0;
+            const totalPages = Math.ceil(total / limit);
+            
+            // Fetch remaining pages in parallel
+            if (totalPages > 1) {
+                const promises = [];
+                for (let p = 2; p <= totalPages; p++) {
+                    promises.push(API.fetchJson(`/assets?page=${p}&limit=${limit}`));
+                }
+                
+                const results = await Promise.all(promises);
+                results.forEach(res => {
+                    if (res.assets) {
+                        allFetched = [...allFetched, ...res.assets];
+                    }
+                });
+            }
+            
+            const elapsed = Date.now() - startTime;
+            log(`Background preload: Complete - ${allFetched.length} assets in ${elapsed}ms`);
+            return allFetched;
+        } catch (error) {
+            console.error("Background preload failed:", error);
+            return null;
+        }
+    };
+
+    /**
+     * Silently preloads folders in background without UI updates.
+     * @returns {Promise<Array|null>} Array of folders or null on failure
+     */
+    const preloadFoldersInBackground = async () => {
+        try {
+            log("Background preload: Starting folder fetch...");
+            const folders = await API.fetchFolders();
+            log(`Background preload: Loaded ${folders.length} folders`);
+            return folders;
+        } catch (error) {
+            console.error("Background folder preload failed:", error);
+            return null;
+        }
+    };
+
+    /**
+     * Starts background preloading of assets and folders.
+     * Should be called as soon as API key is available.
+     */
+    const startBackgroundPreload = () => {
+        if (!state.preloadPromise) {
+            log("Starting background preload...");
+            state.preloadPromise = preloadAssetsInBackground();
+            state.preloadFoldersPromise = preloadFoldersInBackground();
+        }
+    };
+
+    /**
+     * Loads folders from API and builds lookup map.
+     * Uses preloaded data if available.
      * @returns {Promise<Array>} Array of folder objects
      */
     const loadFolders = async () => {
-        const folders = await API.fetchFolders();
+        let folders;
+        
+        // Use preloaded folders if available
+        if (state.preloadFoldersPromise) {
+            log("Using preloaded folders...");
+            folders = await state.preloadFoldersPromise;
+            state.preloadFoldersPromise = null;
+            
+            // If preload failed, fetch normally
+            if (!folders) {
+                log("Preloaded folders unavailable, fetching fresh...");
+                folders = await API.fetchFolders();
+            }
+        } else {
+            folders = await API.fetchFolders();
+        }
+        
         state.folders = folders;
         
         // Build lookup map
@@ -169,55 +260,76 @@
     };
 
     /**
-     * Fetches ALL assets from the API to allow client-side filtering
+     * Fetches ALL assets from the API to allow client-side filtering.
+     * Uses preloaded data if available.
      */
     const syncAssets = async () => {
         state.fetchSession++;
         const currentSession = state.fetchSession;
         
-        UI.setStatus("Connecting to server...", "info");
         UI.setLoading(true);
         
         try {
-            let page = 1;
-            const limit = 100;
-            let allFetched = [];
-            let total = 0;
+            let allFetched = null;
             
-            log(`Syncing assets page ${page}...`);
-            let data = await API.fetchJson(`/assets?page=${page}&limit=${limit}`);
-            
-            allFetched = [...(data.assets || [])];
-            total = data.total || 0;
-            
-            const totalPages = Math.ceil(total / limit);
-            
-            UI.setStatus(`Loading assets (${allFetched.length}/${total})...`, "info");
-            
-            if (totalPages > 1) {
-                log(`Fetching ${totalPages - 1} more pages...`);
-                const promises = [];
-                for (let p = 2; p <= totalPages; p++) {
-                    promises.push(API.fetchJson(`/assets?page=${p}&limit=${limit}`));
+            // Check if we have preloaded assets available
+            if (state.preloadPromise) {
+                UI.setStatus("Loading assets...", "info");
+                log("Waiting for preloaded assets...");
+                allFetched = await state.preloadPromise;
+                state.preloadPromise = null;
+                
+                if (allFetched) {
+                    log(`Using ${allFetched.length} preloaded assets`);
+                } else {
+                    log("Preloaded assets unavailable, fetching fresh...");
                 }
+            }
+            
+            // If preload failed or wasn't available, fetch normally
+            if (!allFetched) {
+                UI.setStatus("Connecting to server...", "info");
                 
-                // Show progress as pages load
-                let loadedPages = 1;
-                const results = await Promise.all(
-                    promises.map(async (promise) => {
-                        const result = await promise;
-                        loadedPages++;
-                        const loaded = Math.min(loadedPages * limit, total);
-                        UI.setStatus(`Loading assets (${loaded}/${total})...`, "info");
-                        return result;
-                    })
-                );
+                let page = 1;
+                const limit = 100;
+                allFetched = [];
+                let total = 0;
                 
-                results.forEach(res => {
-                    if (res.assets) {
-                        allFetched = [...allFetched, ...res.assets];
+                log(`Syncing assets page ${page}...`);
+                let data = await API.fetchJson(`/assets?page=${page}&limit=${limit}`);
+                
+                allFetched = [...(data.assets || [])];
+                total = data.total || 0;
+                
+                const totalPages = Math.ceil(total / limit);
+                
+                UI.setStatus(`Loading assets (${allFetched.length}/${total})...`, "info");
+                
+                if (totalPages > 1) {
+                    log(`Fetching ${totalPages - 1} more pages...`);
+                    const promises = [];
+                    for (let p = 2; p <= totalPages; p++) {
+                        promises.push(API.fetchJson(`/assets?page=${p}&limit=${limit}`));
                     }
-                });
+                    
+                    // Show progress as pages load
+                    let loadedPages = 1;
+                    const results = await Promise.all(
+                        promises.map(async (promise) => {
+                            const result = await promise;
+                            loadedPages++;
+                            const loaded = Math.min(loadedPages * limit, total);
+                            UI.setStatus(`Loading assets (${loaded}/${total})...`, "info");
+                            return result;
+                        })
+                    );
+                    
+                    results.forEach(res => {
+                        if (res.assets) {
+                            allFetched = [...allFetched, ...res.assets];
+                        }
+                    });
+                }
             }
             
             if (state.fetchSession !== currentSession) return;
@@ -425,7 +537,10 @@
 
             UI.hideApiKeyModal();
             state.apiKey = apiKey;
-            UI.showFeedbackButton(); // Show feedback button when authenticated
+            UI.showFeedbackButton();
+            
+            // Start background preload immediately after successful API key submission
+            startBackgroundPreload();
             
             if (state.isFirstRun) {
                 state.isFirstRun = false;
@@ -436,7 +551,11 @@
                 UI.renderWelcomeScreen();
             } else {
                 UI.setStatus("API key updated successfully!", "success");
-                state.cache = {}; 
+                state.cache = {};
+                // Clear any existing preload since we're refreshing with new key
+                state.preloadPromise = null;
+                state.preloadFoldersPromise = null;
+                startBackgroundPreload();
                 const folders = await loadFolders();
                 UI.renderFolders(folders, selectFolder);
                 if (!state.isWelcome) {
@@ -730,14 +849,17 @@
     const bindEvents = () => {
         UI.elements.refreshButton.addEventListener("click", async () => {
             log("Manual refresh requested.");
-            state.cache = {}; 
-            handleClearSearch(); // Clear search on refresh
-            clearSelection(); // Clear selection on refresh
+            state.cache = {};
+            // Clear any pending preloads to ensure fresh data
+            state.preloadPromise = null;
+            state.preloadFoldersPromise = null;
+            handleClearSearch();
+            clearSelection();
             
             // Check version on refresh
             const versionOk = await checkVersion();
             if (!versionOk) {
-                return; // Stop if update is required
+                return;
             }
             
             const folders = await loadFolders();
@@ -953,19 +1075,17 @@
         try {
             log("Initializing panel UI.");
             
-            // Check version first
-            const versionOk = await checkVersion();
-            if (!versionOk) {
-                UI.setLoading(false);
-                return; // Stop initialization if update is required
-            }
-            
+            // Check for stored API key first - if available, start preloading immediately
             const storedKey = API.getStoredApiKey();
             if (storedKey) {
                 state.apiKey = storedKey;
                 API.setApiKey(storedKey);
-                UI.showFeedbackButton(); // Show feedback button when authenticated
-                log("API key loaded from storage");
+                
+                // Start background preload ASAP - don't wait for version check
+                startBackgroundPreload();
+                
+                UI.showFeedbackButton();
+                log("API key loaded from storage, background preload started");
             } else {
                 log("No API key found - first run");
                 state.isFirstRun = true;
@@ -973,14 +1093,26 @@
                 UI.showApiKeyModal(true);
                 return;
             }
+            
+            // Check version (runs in parallel with background preload)
+            const versionOk = await checkVersion();
+            if (!versionOk) {
+                UI.setLoading(false);
+                // Clear preload promises if update is required
+                state.preloadPromise = null;
+                state.preloadFoldersPromise = null;
+                return;
+            }
 
             await Utils.loadHostScript();
             
+            // Folders may already be preloaded by now
             const folders = await loadFolders();
             UI.renderFolders(folders, selectFolder);
 
             UI.renderWelcomeScreen();
             
+            // Assets may already be preloaded by now
             syncAssets();
             
             // Start periodic version check (every 5 minutes)
