@@ -70,28 +70,7 @@
     };
 
     /**
-     * Gets all descendant folder IDs for a given folder
-     * @param {string} folderId - Parent folder ID
-     * @returns {Set<string>} Set of descendant folder IDs (including the parent)
-     */
-    const getDescendantFolderIds = (folderId) => {
-        const descendants = new Set([folderId]);
-        
-        const addChildren = (parentId) => {
-            state.folders.forEach(folder => {
-                if (folder.parentId === parentId && !descendants.has(folder.id)) {
-                    descendants.add(folder.id);
-                    addChildren(folder.id);
-                }
-            });
-        };
-        
-        addChildren(folderId);
-        return descendants;
-    };
-
-    /**
-     * Filters assets by current folder (includes subfolder assets)
+     * Filters assets by current folder (only direct folder, not subfolders)
      * @param {Array} allAssets - List of all assets
      * @returns {Array} - Filtered assets
      */
@@ -100,11 +79,8 @@
             return allAssets;
         }
         
-        // Get all descendant folder IDs to include subfolder assets
-        const validFolderIds = getDescendantFolderIds(state.selectedFolderId);
-        
         return allAssets.filter(asset => {
-            return validFolderIds.has(String(asset.folderId));
+            return String(asset.folderId) === String(state.selectedFolderId);
         });
     };
 
