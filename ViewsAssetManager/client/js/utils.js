@@ -243,12 +243,23 @@ try {
     Copy-Item -Path $src -Destination $dest -Recurse -Force -ErrorAction Stop
     $log += "Copy completed"
     
-    # Verify copy succeeded
-    $manifestPath = Join-Path $dest "CSXS\\manifest.xml"
-    if (-not (Test-Path $manifestPath)) {
-        throw "Copy verification failed - manifest not found at $manifestPath"
+    # Verify copy succeeded by comparing manifest versions
+    $srcManifest = Join-Path $src "CSXS\\manifest.xml"
+    $destManifest = Join-Path $dest "CSXS\\manifest.xml"
+    
+    if (-not (Test-Path $destManifest)) {
+        throw "Copy verification failed - manifest not found at $destManifest"
     }
-    $log += "Verified manifest exists"
+    
+    $srcVersion = (Select-String -Path $srcManifest -Pattern 'ExtensionBundleVersion="([^"]+)"').Matches.Groups[1].Value
+    $destVersion = (Select-String -Path $destManifest -Pattern 'ExtensionBundleVersion="([^"]+)"').Matches.Groups[1].Value
+    $log += "Source version: $srcVersion"
+    $log += "Installed version: $destVersion"
+    
+    if ($srcVersion -ne $destVersion) {
+        throw "Version mismatch after copy - src: $srcVersion, dest: $destVersion"
+    }
+    $log += "Version verified"
     
     # Write success with log
     ("SUCCESS" + [Environment]::NewLine + ($log -join [Environment]::NewLine)) | Out-File -FilePath $logFile -Encoding UTF8
