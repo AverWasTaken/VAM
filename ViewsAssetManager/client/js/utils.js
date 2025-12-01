@@ -194,16 +194,15 @@
                 // Mac: Use AppleScript to request admin password
                 const shellScript = `
 #!/bin/bash
-MANIFEST="${extensionDest}/CSXS/manifest.xml"
+VERSION_FILE="${extensionDest}/version.json"
 API_VERSION="${apiVersion}"
 
 rm -rf "${extensionDest}" 2>/dev/null
 cp -R "${clonedExtPath}" "${extensionDest}"
 
-if [ -f "$MANIFEST" ]; then
-    # Update manifest version to match API version
-    sed -i '' "s/ExtensionBundleVersion=\\"[^\\"]*\\"/ExtensionBundleVersion=\\"$API_VERSION\\"/g" "$MANIFEST"
-    sed -i '' "s/\\(<Extension Id=\\"com.views.assetmanager\\" Version=\\"\\)[^\\"]*\\(\\"\\)/\\1$API_VERSION\\2/g" "$MANIFEST"
+if [ -d "${extensionDest}" ]; then
+    # Update version.json to match API version
+    echo '{"version": "'$API_VERSION'"}' > "$VERSION_FILE"
     echo "SUCCESS - Updated to version $API_VERSION" > "${resultPath}"
 else
     echo "ERROR: Copy failed" > "${resultPath}"
@@ -266,25 +265,18 @@ try {
     Copy-Item -Path $src -Destination $dest -Recurse -Force -ErrorAction Stop
     $log += "Copy completed"
     
-    # Update manifest version to match API version
-    $destManifest = Join-Path $dest "CSXS\\manifest.xml"
-    
-    if (-not (Test-Path $destManifest)) {
-        throw "Copy verification failed - manifest not found at $destManifest"
-    }
-    
-    $manifestContent = Get-Content $destManifest -Raw
-    $manifestContent = $manifestContent -replace 'ExtensionBundleVersion="[^"]+"', ('ExtensionBundleVersion="' + $apiVersion + '"')
-    $manifestContent = $manifestContent -replace '(<Extension Id="com.views.assetmanager" Version=")[^"]+(")', ('$1' + $apiVersion + '$2')
-    Set-Content -Path $destManifest -Value $manifestContent -Encoding UTF8
-    $log += "Updated manifest to version $apiVersion"
+    # Update version.json to match API version
+    $versionFile = Join-Path $dest "version.json"
+    $versionJson = '{"version": "' + $apiVersion + '"}'
+    Set-Content -Path $versionFile -Value $versionJson -Encoding UTF8
+    $log += "Updated version.json to $apiVersion"
     
     # Verify the update
-    $newVersion = (Select-String -Path $destManifest -Pattern 'ExtensionBundleVersion="([^"]+)"').Matches.Groups[1].Value
-    $log += "Verified manifest version: $newVersion"
+    $versionContent = Get-Content $versionFile -Raw | ConvertFrom-Json
+    $log += "Verified version: $($versionContent.version)"
     
-    if ($newVersion -ne $apiVersion) {
-        throw "Version update failed - expected $apiVersion, got $newVersion"
+    if ($versionContent.version -ne $apiVersion) {
+        throw "Version update failed - expected $apiVersion, got $($versionContent.version)"
     }
     
     # Write success with log

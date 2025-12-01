@@ -14,12 +14,12 @@
     const API_BASE_URL = "https://api.viewseditors.com";
     const API_KEY_STORAGE_KEY = "views_asset_manager_api_key";
     
-    /** Cached extension version read from manifest */
+    /** Cached extension version read from version.json */
     let cachedExtensionVersion = null;
     
     /**
-     * Gets the extension version from the manifest.xml
-     * @returns {string} Version string from manifest
+     * Gets the extension version from version.json
+     * @returns {string} Version string
      */
     const getExtensionVersion = () => {
         if (cachedExtensionVersion) return cachedExtensionVersion;
@@ -29,19 +29,19 @@
             const extensionPath = csInterface.getSystemPath(SystemPath.EXTENSION);
             const fs = require("fs");
             const path = require("path");
-            const manifestPath = path.join(extensionPath, "CSXS", "manifest.xml");
+            const versionPath = path.join(extensionPath, "version.json");
             
-            if (fs.existsSync(manifestPath)) {
-                const manifestContent = fs.readFileSync(manifestPath, "utf8");
-                const match = manifestContent.match(/ExtensionBundleVersion="([^"]+)"/);
-                if (match && match[1]) {
-                    cachedExtensionVersion = match[1];
-                    log("Read extension version from manifest:", cachedExtensionVersion);
+            if (fs.existsSync(versionPath)) {
+                const versionContent = fs.readFileSync(versionPath, "utf8");
+                const versionData = JSON.parse(versionContent);
+                if (versionData && versionData.version) {
+                    cachedExtensionVersion = versionData.version;
+                    log("Read extension version from version.json:", cachedExtensionVersion);
                     return cachedExtensionVersion;
                 }
             }
         } catch (e) {
-            log("Failed to read version from manifest:", e.message);
+            log("Failed to read version from version.json:", e.message);
         }
         
         // Fallback
