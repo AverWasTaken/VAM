@@ -263,10 +263,18 @@ try {
     
     # Write success with log
     ("SUCCESS" + [Environment]::NewLine + ($log -join [Environment]::NewLine)) | Out-File -FilePath $logFile -Encoding UTF8
+    Write-Host "SUCCESS" -ForegroundColor Green
+    $log | ForEach-Object { Write-Host $_ }
 } catch {
     # Write error with log
     ("ERROR: $_" + [Environment]::NewLine + ($log -join [Environment]::NewLine)) | Out-File -FilePath $logFile -Encoding UTF8
+    Write-Host "ERROR: $_" -ForegroundColor Red
+    $log | ForEach-Object { Write-Host $_ }
 }
+
+Write-Host ""
+Write-Host "Press any key to close..." -ForegroundColor Yellow
+$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
 `;
                 
                 fs.writeFileSync(scriptPath, scriptContent, "utf8");
