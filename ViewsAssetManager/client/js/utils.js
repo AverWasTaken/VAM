@@ -222,18 +222,39 @@ $src = '${clonedExtPath.replace(/'/g, "''")}'
 $dest = '${extensionDest.replace(/'/g, "''")}'
 $logFile = '${resultPath.replace(/'/g, "''")}'
 
+$log = @()
+$log += "Source: $src"
+$log += "Dest: $dest"
+$log += "Source exists: $(Test-Path $src)"
+
 try {
     # Remove old extension if exists
     if (Test-Path $dest) {
         Remove-Item -Path $dest -Recurse -Force -ErrorAction Stop
+        $log += "Removed old destination"
     }
+    
+    # Verify source exists
+    if (-not (Test-Path $src)) {
+        throw "Source path does not exist: $src"
+    }
+    
     # Copy new extension
     Copy-Item -Path $src -Destination $dest -Recurse -Force -ErrorAction Stop
-    # Write success
-    'SUCCESS' | Out-File -FilePath $logFile -Encoding UTF8
+    $log += "Copy completed"
+    
+    # Verify copy succeeded
+    $manifestPath = Join-Path $dest "CSXS\\manifest.xml"
+    if (-not (Test-Path $manifestPath)) {
+        throw "Copy verification failed - manifest not found at $manifestPath"
+    }
+    $log += "Verified manifest exists"
+    
+    # Write success with log
+    ("SUCCESS" + [Environment]::NewLine + ($log -join [Environment]::NewLine)) | Out-File -FilePath $logFile -Encoding UTF8
 } catch {
-    # Write error
-    "ERROR: $_" | Out-File -FilePath $logFile -Encoding UTF8
+    # Write error with log
+    ("ERROR: $_" + [Environment]::NewLine + ($log -join [Environment]::NewLine)) | Out-File -FilePath $logFile -Encoding UTF8
 }
 `;
                 
@@ -243,7 +264,9 @@ try {
                 if (onProgress) onProgress("Installing (approve admin prompt)...");
                 
                 // Run PowerShell with elevation - this will show UAC prompt
-                const elevateCmd = `powershell -Command "Start-Process powershell -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File \\"${scriptPath}\\"' -Verb RunAs -Wait"`;
+                // Use forward slashes in path to avoid escaping issues
+                const scriptPathForCmd = scriptPath.replace(/\\/g, "/");
+                const elevateCmd = `powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','${scriptPathForCmd}' -Verb RunAs -Wait"`;
                 log("Running elevated command:", elevateCmd);
                 
                 try {
@@ -272,16 +295,19 @@ try {
             }
             
             const result = fs.readFileSync(resultPath, "utf8").trim();
-            log("Install result:", result);
+            log("Install result file contents:\n", result);
             
             // Cleanup result file
             try { fs.unlinkSync(resultPath); } catch (e) { /* ignore */ }
             
-            if (result.startsWith("ERROR:")) {
-                throw new Error("Installation failed: " + result.substring(7));
+            // Check first line for SUCCESS or ERROR
+            const firstLine = result.split("\n")[0].trim();
+            
+            if (firstLine.startsWith("ERROR:")) {
+                throw new Error("Installation failed: " + result);
             }
             
-            if (result !== "SUCCESS") {
+            if (!firstLine.startsWith("SUCCESS")) {
                 throw new Error("Installation returned unexpected result: " + result);
             }
             
