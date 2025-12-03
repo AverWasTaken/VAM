@@ -11,7 +11,8 @@
         GRID_SIZE: "views_grid_size",
         LAST_FOLDER: "views_last_folder",
         SIDEBAR_COLLAPSED: "views_sidebar_collapsed",
-        FAVORITES: "views_favorites"
+        FAVORITES: "views_favorites",
+        CACHE_NOTICE_SEEN: "views_cache_notice_seen"
     };
 
     /**
@@ -143,6 +144,17 @@
         }
     };
 
+    /**
+     * Checks if the cache location notice has been shown
+     * @returns {boolean} True if user has seen the notice
+     */
+    const hasCacheNoticeSeen = () => get(STORAGE_KEYS.CACHE_NOTICE_SEEN, false);
+
+    /**
+     * Marks the cache location notice as seen
+     */
+    const setCacheNoticeSeen = () => set(STORAGE_KEYS.CACHE_NOTICE_SEEN, true);
+
     global.Views.Preferences = {
         getGridSize,
         setGridSize,
@@ -154,7 +166,9 @@
         isFavorite,
         addFavorite,
         removeFavorite,
-        toggleFavorite
+        toggleFavorite,
+        hasCacheNoticeSeen,
+        setCacheNoticeSeen
     };
 
 })(window);
