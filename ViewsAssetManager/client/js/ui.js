@@ -106,7 +106,25 @@
         }
     };
 
-    const setStatus = (message = "", tone = "info") => {
+    /** Timer for auto-hiding status messages */
+    let statusHideTimer = null;
+
+    /** How long to show status messages before auto-hiding (5 seconds) */
+    const STATUS_AUTO_HIDE_MS = 5000;
+
+    /**
+     * Sets the status message with optional auto-hide
+     * @param {string} message - Status message to display
+     * @param {string} tone - Tone of the message (info, success, error)
+     * @param {boolean} autoHide - Whether to auto-hide after timeout (default: true)
+     */
+    const setStatus = (message = "", tone = "info", autoHide = true) => {
+        // Clear any existing timer
+        if (statusHideTimer) {
+            clearTimeout(statusHideTimer);
+            statusHideTimer = null;
+        }
+
         if (!message) {
             elements.status.textContent = "";
             elements.status.className = "status status--hidden";
@@ -115,6 +133,14 @@
 
         elements.status.textContent = message;
         elements.status.className = `status status--${tone}`;
+
+        // Auto-hide after 5 seconds (except for persistent messages)
+        if (autoHide) {
+            statusHideTimer = setTimeout(() => {
+                elements.status.className = "status status--hidden";
+                statusHideTimer = null;
+            }, STATUS_AUTO_HIDE_MS);
+        }
     };
 
     const setLoading = (shouldShow) => {

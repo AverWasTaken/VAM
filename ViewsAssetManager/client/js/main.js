@@ -111,6 +111,17 @@
             const query = UI.getSearchQuery();
             state.searchQuery = query;
             state.visibleCount = 20;
+
+            // If on welcome screen and user starts searching, switch to "all" view
+            if (state.isWelcome && query) {
+                state.isWelcome = false;
+                state.selectedFolderId = "all";
+                UI.elements.folderList.querySelectorAll(".folder-item").forEach((item) => {
+                    item.classList.toggle("folder-item--active", item.dataset.folderId === "all");
+                });
+                UI.hideBreadcrumbs();
+            }
+
             AssetController.updateAssetView(getAssetCallbacks());
             log(`Search query: "${query}"`);
         }, 200);
