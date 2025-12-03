@@ -1,0 +1,207 @@
+/**
+ * Folder Styles
+ * Sidebar, folder items, breadcrumbs
+ */
+
+/* Folder Sidebar */
+.folder-sidebar {
+    width: 200px;
+    background: linear-gradient(180deg, var(--ae-bg-panel) 0%, var(--ae-bg-dark) 100%);
+    border-right: 1px solid var(--ae-border-subtle);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    flex-shrink: 0;
+}
+
+.folder-sidebar__header {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--ae-border-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+}
+
+.folder-sidebar__header h2 {
+    margin: 0;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--ae-text-muted);
+}
+
+.folder-list {
+    list-style: none;
+    margin: 0;
+    padding: 8px;
+}
+
+.folder-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    cursor: pointer;
+    transition: all var(--transition);
+    color: var(--ae-text-secondary);
+    font-size: 13px;
+    user-select: none;
+    border-radius: var(--radius-sm);
+    margin-bottom: 2px;
+}
+
+.folder-item:hover {
+    background-color: var(--ae-bg-elevated);
+    color: var(--ae-text-primary);
+}
+
+.folder-item--active {
+    background: linear-gradient(135deg, var(--ae-accent-soft) 0%, rgba(0, 163, 224, 0.08) 100%);
+    color: var(--ae-text-primary);
+    font-weight: 500;
+    border: 1px solid rgba(0, 163, 224, 0.2);
+}
+
+.folder-item--active:hover {
+    background: linear-gradient(135deg, rgba(0, 163, 224, 0.2) 0%, var(--ae-accent-soft) 100%);
+}
+
+.folder-item svg {
+    flex-shrink: 0;
+    opacity: 0.6;
+}
+
+.folder-item--active svg {
+    opacity: 1;
+    color: var(--ae-accent);
+}
+
+.folder-item__name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.folder-item__count {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--ae-text-muted);
+    background-color: var(--ae-bg-dark);
+    padding: 2px 8px;
+    border-radius: 12px;
+    min-width: 24px;
+    text-align: center;
+}
+
+.folder-item--active .folder-item__count {
+    background: var(--ae-accent-soft);
+    color: var(--ae-accent);
+}
+
+/* Folder hierarchy styles */
+.folder-item--hidden {
+    display: none;
+}
+
+.folder-item__toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    margin-right: 2px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--ae-text-muted);
+    border-radius: 4px;
+    flex-shrink: 0;
+    transition: all var(--transition-fast);
+}
+
+.folder-item__toggle:hover {
+    color: var(--ae-text-primary);
+    background-color: var(--ae-bg-elevated);
+}
+
+.folder-item__toggle-icon {
+    transition: transform 0.15s ease;
+}
+
+.folder-item--expanded > .folder-item__toggle .folder-item__toggle-icon {
+    transform: rotate(90deg);
+}
+
+.folder-item__toggle-spacer {
+    width: 20px;
+    flex-shrink: 0;
+}
+
+/* Breadcrumb Navigation */
+.breadcrumb-nav {
+    padding: 0 0 12px 0;
+    margin-bottom: 4px;
+    border-bottom: 1px solid var(--ae-border-subtle);
+    flex-shrink: 0;
+}
+
+.breadcrumb-nav--hidden {
+    display: none;
+}
+
+.breadcrumb-list {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    flex-wrap: wrap;
+}
+
+.breadcrumb-item {
+    display: flex;
+    align-items: center;
+}
+
+.breadcrumb-separator {
+    display: flex;
+    align-items: center;
+    color: var(--ae-text-muted);
+    opacity: 0.5;
+}
+
+.breadcrumb-link {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 10px;
+    background: none;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--ae-text-muted);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.breadcrumb-link:hover {
+    color: var(--ae-text-primary);
+    background-color: var(--ae-bg-elevated);
+}
+
+.breadcrumb-link svg {
+    flex-shrink: 0;
+}
+
+.breadcrumb-current {
+    padding: 5px 10px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--ae-text-primary);
+}
+
