@@ -70,7 +70,98 @@
         currentVersion: document.getElementById("currentVersion"),
         newVersion: document.getElementById("newVersion"),
         // Version badge
-        versionBadge: document.getElementById("versionBadge")
+        versionBadge: document.getElementById("versionBadge"),
+        // Sidebar
+        folderSidebar: document.getElementById("folderSidebar"),
+        sidebarToggle: document.getElementById("sidebarToggle"),
+        // Context menu
+        contextMenu: document.getElementById("contextMenu"),
+        contextMenuFavoriteText: document.getElementById("contextMenuFavoriteText"),
+        // Sync modal
+        syncModal: document.getElementById("syncModal"),
+        syncStatus: document.getElementById("syncStatus"),
+        syncProgressBar: document.getElementById("syncProgressBar"),
+        syncProgressText: document.getElementById("syncProgressText"),
+        // Cache notice modal
+        cacheNoticeModal: document.getElementById("cacheNoticeModal"),
+        cachePath: document.getElementById("cachePath"),
+        cacheNoticeOkButton: document.getElementById("cacheNoticeOkButton")
+    };
+
+    /** Current context menu target asset */
+    let contextMenuAsset = null;
+
+    /** Callbacks for context menu actions */
+    let contextMenuCallbacks = {};
+
+    /**
+     * Sync Modal - shown during initial asset sync
+     */
+    const SyncModal = {
+        show() {
+            if (elements.syncModal) {
+                elements.syncModal.classList.remove("modal--hidden");
+            }
+            this.setStatus("Connecting to server...");
+            this.setProgress(0);
+        },
+        
+        hide() {
+            if (elements.syncModal) {
+                elements.syncModal.classList.add("modal--hidden");
+            }
+        },
+        
+        setStatus(message) {
+            if (elements.syncStatus) {
+                elements.syncStatus.textContent = message;
+            }
+        },
+        
+        setProgress(percent) {
+            const p = Math.max(0, Math.min(100, percent));
+            if (elements.syncProgressBar) {
+                elements.syncProgressBar.style.width = `${p}%`;
+            }
+            if (elements.syncProgressText) {
+                elements.syncProgressText.textContent = `${Math.round(p)}%`;
+            }
+        }
+    };
+
+    /**
+     * Cache Notice Modal - shown when cache folder is first created
+     */
+    const CacheNoticeModal = {
+        show(cachePath) {
+            if (elements.cacheNoticeModal) {
+                if (elements.cachePath && cachePath) {
+                    elements.cachePath.textContent = cachePath;
+                }
+                elements.cacheNoticeModal.classList.remove("modal--hidden");
+            }
+        },
+        
+        hide() {
+            if (elements.cacheNoticeModal) {
+                elements.cacheNoticeModal.classList.add("modal--hidden");
+            }
+        },
+        
+        init() {
+            if (elements.cacheNoticeOkButton) {
+                elements.cacheNoticeOkButton.addEventListener("click", () => {
+                    this.hide();
+                });
+            }
+            
+            if (elements.cacheNoticeModal) {
+                const overlay = elements.cacheNoticeModal.querySelector(".modal__overlay");
+                if (overlay) {
+                    overlay.addEventListener("click", () => this.hide());
+                }
+            }
+        }
     };
 
     const LoadingOverlay = {
@@ -106,7 +197,25 @@
         }
     };
 
-    const setStatus = (message = "", tone = "info") => {
+    /** Timer for auto-hiding status messages */
+    let statusHideTimer = null;
+
+    /** How long to show status messages before auto-hiding (5 seconds) */
+    const STATUS_AUTO_HIDE_MS = 5000;
+
+    /**
+     * Sets the status message with optional auto-hide
+     * @param {string} message - Status message to display
+     * @param {string} tone - Tone of the message (info, success, error)
+     * @param {boolean} autoHide - Whether to auto-hide after timeout (default: true)
+     */
+    const setStatus = (message = "", tone = "info", autoHide = true) => {
+        // Clear any existing timer
+        if (statusHideTimer) {
+            clearTimeout(statusHideTimer);
+            statusHideTimer = null;
+        }
+
         if (!message) {
             elements.status.textContent = "";
             elements.status.className = "status status--hidden";
@@ -115,6 +224,14 @@
 
         elements.status.textContent = message;
         elements.status.className = `status status--${tone}`;
+
+        // Auto-hide after 5 seconds (except for persistent messages)
+        if (autoHide) {
+            statusHideTimer = setTimeout(() => {
+                elements.status.className = "status status--hidden";
+                statusHideTimer = null;
+            }, STATUS_AUTO_HIDE_MS);
+        }
     };
 
     const setLoading = (shouldShow) => {
@@ -130,59 +247,51 @@
         
         const container = document.createElement("div");
         container.className = "welcome-screen";
-        container.style.display = "flex";
-        container.style.flexDirection = "column";
-        container.style.alignItems = "center";
-        container.style.justifyContent = "center";
-        container.style.minHeight = "100%";
-        container.style.gridColumn = "1 / -1"; // Fix squished look by spanning all columns
-        container.style.color = "var(--ae-text-secondary)";
-        container.style.textAlign = "center";
-        container.style.padding = "2rem";
 
-        const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-        icon.setAttribute("width", "48");
-        icon.setAttribute("height", "48");
-        icon.setAttribute("viewBox", "0 0 24 24");
-        icon.setAttribute("fill", "currentColor");
-        icon.style.marginBottom = "1rem";
-        icon.style.opacity = "0.5";
-        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-        path.setAttribute("d", "M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z");
-        icon.appendChild(path);
-
-        const title = document.createElement("h2");
-        title.textContent = "Welcome to Views Asset Manager";
-        title.style.margin = "0 0 0.5rem 0";
-        title.style.fontSize = "1.2rem";
-        title.style.fontWeight = "600";
-        title.style.color = "var(--ae-text-primary)";
-
-        const text = document.createElement("p");
-        text.textContent = "Select a folder from the sidebar to view assets.";
-        text.style.margin = "0 0 2rem 0";
-
-        const credits = document.createElement("div");
-        credits.style.fontSize = "0.85rem";
-        credits.style.opacity = "0.7";
-        credits.style.lineHeight = "1.6";
-        credits.innerHTML = `
-            <p style="margin: 0 0 0.5rem 0">Made by ayvyr, assets by soracrt.</p>
-            <p style="margin: 0">If you have issues, join <a href="#" id="discordLink" style="color: var(--ae-accent); text-decoration: none; border-bottom: 1px solid transparent;">discord.gg/views</a> and make a ticket.</p>
+        container.innerHTML = `
+            <div class="welcome-screen__hero">
+                <img class="welcome-screen__logo" src="img/logo.png" alt="Views" width="56" height="56" />
+            </div>
+            
+            <h1 class="welcome-screen__title">Welcome</h1>
+            <p class="welcome-screen__subtitle">We're glad you're here! Now go start creating!</p>
+            
+            <div class="welcome-screen__tips">
+                <div class="welcome-screen__tip">
+                    <div class="welcome-screen__tip-icon">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+                        </svg>
+                    </div>
+                    <div class="welcome-screen__tip-text">
+                        <div class="welcome-screen__tip-title">Select a Folder</div>
+                        <div class="welcome-screen__tip-desc">Choose from the sidebar or use "All Assets"</div>
+                    </div>
+                </div>
+                <div class="welcome-screen__tip">
+                    <div class="welcome-screen__tip-icon">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                        </svg>
+                    </div>
+                    <div class="welcome-screen__tip-text">
+                        <div class="welcome-screen__tip-title">Favorites</div>
+                        <div class="welcome-screen__tip-desc">Star your favorite assets to access them quickly</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="welcome-screen__credits">
+                <p>Made by <strong>ayvyr</strong> · Assets by <strong>soracrt</strong></p>
+                <p>Need help? Join <a href="#" id="discordLink">discord.gg/views</a></p>
+            </div>
         `;
-
-        container.appendChild(icon);
-        container.appendChild(title);
-        container.appendChild(text);
-        container.appendChild(credits);
 
         elements.grid.appendChild(container);
 
         // Handle external link
         const link = container.querySelector("#discordLink");
         if (link) {
-            link.addEventListener("mouseenter", () => link.style.borderBottomColor = "var(--ae-accent)");
-            link.addEventListener("mouseleave", () => link.style.borderBottomColor = "transparent");
             link.addEventListener("click", (e) => {
                 e.preventDefault();
                 Utils.csInterface.openURLInDefaultBrowser("https://discord.gg/views");
@@ -228,11 +337,14 @@
     const createFolderItem = (folder, depth, hasChildren, onFolderSelect, onToggleExpand) => {
         const li = document.createElement("li");
         li.className = "folder-item";
+        if (depth > 0) {
+            li.classList.add("folder-item--sub");
+        }
         li.dataset.folderId = folder.id;
         if (folder.parentId) {
             li.dataset.parentId = folder.parentId;
         }
-        li.style.paddingLeft = `${8 + (depth * 16)}px`;
+        li.style.paddingLeft = `${10 + (depth * 16)}px`;
         
         // Expand/collapse toggle (only if has children)
         if (hasChildren) {
@@ -294,13 +406,16 @@
      * @param {Function} onFolderSelect - Callback when a folder is clicked
      */
     const renderFolders = (folders, onFolderSelect) => {
-        // Clear existing custom folders (keep "All Assets")
-        const existingItems = elements.folderList.querySelectorAll('.folder-item:not([data-folder-id="all"])');
+        // Clear existing custom folders (keep "All Assets" and "Favorites")
+        const existingItems = elements.folderList.querySelectorAll('.folder-item:not([data-folder-id="all"]):not([data-folder-id="favorites"])');
         existingItems.forEach(item => item.remove());
 
-        // Initialize "All Assets" count to "-" until loaded
+        // Initialize counts to "-" until loaded
         const allItem = elements.folderList.querySelector('[data-folder-id="all"] .folder-item__count');
         if (allItem) allItem.textContent = "-";
+        
+        const favItem = elements.folderList.querySelector('[data-folder-id="favorites"] .folder-item__count');
+        if (favItem) favItem.textContent = "-";
 
         // Build tree structure
         const { rootFolders, childrenMap } = buildFolderTree(folders);
@@ -504,11 +619,12 @@
     /**
      * Creates an asset card element for the grid
      * @param {Object} asset - Asset data from API (id, name, size, thumbnail, uploadDate)
-     * @param {Object} callbacks - Callbacks object with onImport, onPreview, onSelect
+     * @param {Object} callbacks - Callbacks object with onImport, onPreview, onSelect, onFavorite
      * @returns {HTMLElement} Article element containing the asset card
      */
     const createAssetCard = (asset, callbacks) => {
-        const { onImport, onPreview, onSelect, isSelected } = callbacks;
+        const { onImport, onPreview, onSelect, onFavorite, isSelected } = callbacks;
+        const Preferences = global.Views.Preferences;
         
         const card = document.createElement("article");
         card.className = "asset-card" + (isSelected ? " asset-card--selected" : "");
@@ -533,6 +649,34 @@
             if (onSelect) onSelect(asset, card);
         });
 
+        // Favorite button
+        const isFavorited = Preferences && Preferences.isFavorite(asset.id);
+        const favoriteBtn = document.createElement("button");
+        favoriteBtn.type = "button";
+        favoriteBtn.className = "asset-card__favorite" + (isFavorited ? " asset-card__favorite--active" : "");
+        favoriteBtn.title = isFavorited ? "Remove from favorites" : "Add to favorites";
+        const starIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        starIcon.setAttribute("width", "14");
+        starIcon.setAttribute("height", "14");
+        starIcon.setAttribute("viewBox", "0 0 24 24");
+        starIcon.setAttribute("fill", isFavorited ? "currentColor" : "none");
+        starIcon.setAttribute("stroke", "currentColor");
+        starIcon.setAttribute("stroke-width", "2");
+        const starPath = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+        starPath.setAttribute("points", "12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2");
+        starIcon.appendChild(starPath);
+        favoriteBtn.appendChild(starIcon);
+        favoriteBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            if (Preferences) {
+                const nowFavorited = Preferences.toggleFavorite(asset.id);
+                favoriteBtn.classList.toggle("asset-card__favorite--active", nowFavorited);
+                favoriteBtn.title = nowFavorited ? "Remove from favorites" : "Add to favorites";
+                starIcon.setAttribute("fill", nowFavorited ? "currentColor" : "none");
+                if (onFavorite) onFavorite(asset, nowFavorited);
+            }
+        });
+
         const img = document.createElement("img");
         img.className = "asset-card__thumb";
         img.alt = displayName || "Asset thumbnail";
@@ -546,8 +690,8 @@
         img.addEventListener("dblclick", (e) => {
             e.preventDefault();
             // Find the import button and trigger import
-            const importBtn = card.querySelector(".asset-card__cta:not(.asset-card__cta--preview)");
-            if (onImport && importBtn) onImport(asset, importBtn);
+            const importBtnEl = card.querySelector(".asset-card__cta:not(.asset-card__cta--preview)");
+            if (onImport && importBtnEl) onImport(asset, importBtnEl);
         });
 
         const title = document.createElement("p");
@@ -592,7 +736,14 @@
         actions.appendChild(previewBtn);
         actions.appendChild(importBtn);
 
+        // Context menu
+        card.addEventListener("contextmenu", (e) => {
+            e.preventDefault();
+            showContextMenu(e.clientX, e.clientY, asset, callbacks);
+        });
+
         card.appendChild(checkbox);
+        card.appendChild(favoriteBtn);
         card.appendChild(img);
         card.appendChild(title);
         card.appendChild(actions);
@@ -666,6 +817,44 @@
         });
         elements.grid.appendChild(fragment);
         log(`Rendered ${assets.length} assets.`);
+    };
+
+    /**
+     * Appends additional assets to the grid (for infinite scroll)
+     * Does not clear existing content, just adds new items
+     * @param {Array} assets - Array of NEW asset objects to append
+     * @param {Object} callbacks - Callbacks object
+     * @param {number} startIndex - Starting index for animation delay
+     */
+    const appendAssets = (assets, callbacks, startIndex = 0) => {
+        if (!assets.length) return;
+
+        const selectedIds = callbacks.getSelectedIds ? callbacks.getSelectedIds() : [];
+        const fragment = document.createDocumentFragment();
+        
+        assets.forEach((asset, index) => {
+            const isSelected = selectedIds.includes(asset.id);
+            const card = createAssetCard(asset, { ...callbacks, isSelected });
+            // Minimal staggered animation for smoother feel
+            const delay = Math.min(index * 20, 200);
+            card.style.animationDelay = `${delay}ms`;
+            fragment.appendChild(card);
+        });
+        
+        // Remove the scroll sentinel before appending
+        const sentinel = document.getElementById("scrollSentinel");
+        if (sentinel) {
+            sentinel.remove();
+        }
+        
+        elements.grid.appendChild(fragment);
+        
+        // Re-add sentinel after new content
+        if (sentinel) {
+            elements.grid.appendChild(sentinel);
+        }
+        
+        log(`Appended ${assets.length} more assets.`);
     };
 
     /**
@@ -894,10 +1083,11 @@
     };
 
     /**
-     * Sets the grid size
+     * Sets the grid size and persists preference
      * @param {string} size - "small", "medium", or "large"
+     * @param {boolean} persist - Whether to save to preferences (default: true)
      */
-    const setGridSize = (size) => {
+    const setGridSize = (size, persist = true) => {
         // Remove existing size classes
         elements.grid.classList.remove("asset-grid--small", "asset-grid--medium", "asset-grid--large");
         // Add new size class
@@ -910,8 +1100,116 @@
             }
         });
         
+        // Persist preference
+        if (persist && global.Views.Preferences) {
+            global.Views.Preferences.setGridSize(size);
+        }
+        
         log(`Grid size set to: ${size}`);
     };
+
+    /**
+     * Loads and applies saved grid size preference
+     */
+    const loadGridSizePreference = () => {
+        if (global.Views.Preferences) {
+            const savedSize = global.Views.Preferences.getGridSize();
+            if (savedSize) {
+                setGridSize(savedSize, false);
+            }
+        }
+    };
+
+    /**
+     * Toggles the sidebar collapsed state
+     * @param {boolean} [forceState] - Force collapsed state (optional)
+     */
+    const toggleSidebar = (forceState) => {
+        if (!elements.folderSidebar) return;
+        
+        const isCollapsed = forceState !== undefined 
+            ? forceState 
+            : !elements.folderSidebar.classList.contains("folder-sidebar--collapsed");
+        
+        elements.folderSidebar.classList.toggle("folder-sidebar--collapsed", isCollapsed);
+        
+        // Update toggle button title
+        if (elements.sidebarToggle) {
+            elements.sidebarToggle.title = isCollapsed ? "Expand sidebar" : "Collapse sidebar";
+        }
+        
+        // Persist preference
+        if (global.Views.Preferences) {
+            global.Views.Preferences.setSidebarCollapsed(isCollapsed);
+        }
+        
+        log(`Sidebar ${isCollapsed ? "collapsed" : "expanded"}`);
+    };
+
+    /**
+     * Loads and applies saved sidebar state
+     */
+    const loadSidebarPreference = () => {
+        if (global.Views.Preferences && elements.folderSidebar) {
+            const isCollapsed = global.Views.Preferences.getSidebarCollapsed();
+            if (isCollapsed) {
+                toggleSidebar(true);
+            }
+        }
+    };
+
+    /**
+     * Shows the context menu at the specified position
+     * @param {number} x - X coordinate
+     * @param {number} y - Y coordinate
+     * @param {Object} asset - The asset for context actions
+     * @param {Object} callbacks - Callbacks for menu actions
+     */
+    const showContextMenu = (x, y, asset, callbacks) => {
+        if (!elements.contextMenu) return;
+        
+        contextMenuAsset = asset;
+        contextMenuCallbacks = callbacks;
+        
+        // Update favorite text based on current state
+        const isFav = global.Views.Preferences && global.Views.Preferences.isFavorite(asset.id);
+        if (elements.contextMenuFavoriteText) {
+            elements.contextMenuFavoriteText.textContent = isFav ? "Remove from Favorites" : "Add to Favorites";
+        }
+        
+        // Position the menu
+        elements.contextMenu.style.display = "block";
+        
+        // Adjust position if menu would go off screen
+        const menuRect = elements.contextMenu.getBoundingClientRect();
+        const adjustedX = Math.min(x, window.innerWidth - menuRect.width - 10);
+        const adjustedY = Math.min(y, window.innerHeight - menuRect.height - 10);
+        
+        elements.contextMenu.style.left = `${adjustedX}px`;
+        elements.contextMenu.style.top = `${adjustedY}px`;
+    };
+
+    /**
+     * Hides the context menu
+     */
+    const hideContextMenu = () => {
+        if (elements.contextMenu) {
+            elements.contextMenu.style.display = "none";
+        }
+        contextMenuAsset = null;
+    };
+
+    /**
+     * Gets the current context menu asset
+     * @returns {Object|null} The asset or null
+     */
+    const getContextMenuAsset = () => contextMenuAsset;
+
+    /**
+     * Gets the context menu callbacks
+     * @returns {Object} The callbacks
+     */
+    const getContextMenuCallbacks = () => contextMenuCallbacks;
 
     /**
      * Updates the preview navigation buttons state
@@ -1131,6 +1429,8 @@
     global.Views.UI = {
         elements,
         LoadingOverlay,
+        SyncModal,
+        CacheNoticeModal,
         setStatus,
         setLoading,
         renderWelcomeScreen,
@@ -1140,6 +1440,7 @@
         expandToFolder,
         updateFolderCount,
         renderAssets,
+        appendAssets,
         renderSkeletons,
         showApiKeyModal,
         hideApiKeyModal,
@@ -1155,6 +1456,13 @@
         updateSelectionBar,
         toggleCardSelection,
         setGridSize,
+        loadGridSizePreference,
+        toggleSidebar,
+        loadSidebarPreference,
+        showContextMenu,
+        hideContextMenu,
+        getContextMenuAsset,
+        getContextMenuCallbacks,
         updatePreviewNav,
         isPreviewOpen,
         showFeedbackButton,

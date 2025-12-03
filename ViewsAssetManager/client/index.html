@@ -36,16 +36,30 @@
 
         <div class="panel__content">
             <!-- Folder Sidebar -->
-            <aside class="folder-sidebar">
+            <aside id="folderSidebar" class="folder-sidebar">
                 <div class="folder-sidebar__header">
                     <h2>Folders</h2>
+                    <button type="button" id="sidebarToggle" class="sidebar-toggle" title="Collapse sidebar">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="15 18 9 12 15 6"></polyline>
+                        </svg>
+                    </button>
                 </div>
                 <ul id="folderList" class="folder-list">
                     <li class="folder-item" data-folder-id="all">
-                        <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
-                            <path d="M2 3h10v8H2z"/>
+                        <span class="folder-item__toggle-spacer"></span>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M4 4h7v7H4zm9 0h7v7h-7zM4 13h7v7H4zm9 0h7v7h-7z"/>
                         </svg>
                         <span class="folder-item__name">All Assets</span>
+                        <span class="folder-item__count">0</span>
+                    </li>
+                    <li class="folder-item folder-item--favorites" data-folder-id="favorites">
+                        <span class="folder-item__toggle-spacer"></span>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                        </svg>
+                        <span class="folder-item__name">Favorites</span>
                         <span class="folder-item__count">0</span>
                     </li>
                 </ul>
@@ -258,6 +272,31 @@
         </div>
     </div>
 
+    <!-- Sync Modal (initial load) -->
+    <div id="syncModal" class="modal modal--hidden">
+        <div class="modal__overlay"></div>
+        <div class="modal__content sync-modal">
+            <div class="sync-modal__icon">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.66 0 3-4.03 3-9s-1.34-9-3-9m0 18c-1.66 0-3-4.03-3-9s1.34-9 3-9m-9 9a9 9 0 0 1 9-9"/>
+                </svg>
+            </div>
+            <h2 class="sync-modal__title">Syncing Assets</h2>
+            <p id="syncStatus" class="sync-modal__description">
+                Connecting to server...
+            </p>
+            <div class="sync-modal__progress">
+                <div class="sync-progress-bar">
+                    <div id="syncProgressBar" class="sync-progress-fill"></div>
+                </div>
+                <span id="syncProgressText" class="sync-progress-text">0%</span>
+            </div>
+            <p class="sync-modal__note">
+                This may take a moment on first load depending on your internet connection.
+            </p>
+        </div>
+    </div>
+
     <!-- Update Required Modal -->
     <div id="updateModal" class="modal modal--hidden">
         <div class="modal__overlay"></div>
@@ -302,12 +341,81 @@
         </div>
     </div>
 
+    <!-- Cache Location Notice Modal -->
+    <div id="cacheNoticeModal" class="modal modal--hidden">
+        <div class="modal__overlay"></div>
+        <div class="modal__content cache-notice-modal">
+            <div class="cache-notice-modal__icon">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                </svg>
+            </div>
+            <h2 class="cache-notice-modal__title">Asset Storage Location</h2>
+            <p class="cache-notice-modal__description">
+                Your imported assets will be stored permanently in:
+            </p>
+            <div class="cache-notice-modal__path">
+                <code id="cachePath">Documents/ViewsAssetManager/cache</code>
+            </div>
+            <p class="cache-notice-modal__info">
+                This ensures your After Effects projects can always find the assets you've imported, even after restarting.
+            </p>
+            <div class="cache-notice-modal__warning">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+                </svg>
+                <span>If you delete this folder to free up space, any assets used in your projects will show as "missing footage" in After Effects.</span>
+            </div>
+            <div class="modal__actions cache-notice-modal__actions">
+                <button type="button" id="cacheNoticeOkButton" class="btn btn--primary">Got it</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Context Menu (hidden by default) -->
+    <div id="contextMenu" class="context-menu" style="display: none;">
+        <button type="button" class="context-menu__item" data-action="import">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            Import
+        </button>
+        <button type="button" class="context-menu__item" data-action="preview">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+            </svg>
+            Preview
+        </button>
+        <div class="context-menu__divider"></div>
+        <button type="button" class="context-menu__item" data-action="favorite">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+            </svg>
+            <span id="contextMenuFavoriteText">Add to Favorites</span>
+        </button>
+        <div class="context-menu__divider"></div>
+        <button type="button" class="context-menu__item" data-action="copy">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+            Copy Name
+        </button>
+    </div>
+
     <script src="js/CSInterface.js"></script>
     <script src="js/deviceId.js"></script>
     <script src="js/utils.js"></script>
     <script src="js/api.js"></script>
     <script src="js/fileSystem.js"></script>
     <script src="js/ui.js"></script>
+    <script src="js/preferences.js"></script>
+    <script src="js/state.js"></script>
+    <script src="js/assetController.js"></script>
+    <script src="js/folderController.js"></script>
     <script src="js/main.js"></script>
 </body>
 
