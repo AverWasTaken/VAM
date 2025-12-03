@@ -76,7 +76,12 @@
         sidebarToggle: document.getElementById("sidebarToggle"),
         // Context menu
         contextMenu: document.getElementById("contextMenu"),
-        contextMenuFavoriteText: document.getElementById("contextMenuFavoriteText")
+        contextMenuFavoriteText: document.getElementById("contextMenuFavoriteText"),
+        // Sync modal
+        syncModal: document.getElementById("syncModal"),
+        syncStatus: document.getElementById("syncStatus"),
+        syncProgressBar: document.getElementById("syncProgressBar"),
+        syncProgressText: document.getElementById("syncProgressText")
     };
 
     /** Current context menu target asset */
@@ -84,6 +89,41 @@
 
     /** Callbacks for context menu actions */
     let contextMenuCallbacks = {};
+
+    /**
+     * Sync Modal - shown during initial asset sync
+     */
+    const SyncModal = {
+        show() {
+            if (elements.syncModal) {
+                elements.syncModal.classList.remove("modal--hidden");
+            }
+            this.setStatus("Connecting to server...");
+            this.setProgress(0);
+        },
+        
+        hide() {
+            if (elements.syncModal) {
+                elements.syncModal.classList.add("modal--hidden");
+            }
+        },
+        
+        setStatus(message) {
+            if (elements.syncStatus) {
+                elements.syncStatus.textContent = message;
+            }
+        },
+        
+        setProgress(percent) {
+            const p = Math.max(0, Math.min(100, percent));
+            if (elements.syncProgressBar) {
+                elements.syncProgressBar.style.width = `${p}%`;
+            }
+            if (elements.syncProgressText) {
+                elements.syncProgressText.textContent = `${Math.round(p)}%`;
+            }
+        }
+    };
 
     const LoadingOverlay = {
         el: document.getElementById("loadingOverlay"),
@@ -168,59 +208,51 @@
         
         const container = document.createElement("div");
         container.className = "welcome-screen";
-        container.style.display = "flex";
-        container.style.flexDirection = "column";
-        container.style.alignItems = "center";
-        container.style.justifyContent = "center";
-        container.style.minHeight = "100%";
-        container.style.gridColumn = "1 / -1"; // Fix squished look by spanning all columns
-        container.style.color = "var(--ae-text-secondary)";
-        container.style.textAlign = "center";
-        container.style.padding = "2rem";
 
-        const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-        icon.setAttribute("width", "48");
-        icon.setAttribute("height", "48");
-        icon.setAttribute("viewBox", "0 0 24 24");
-        icon.setAttribute("fill", "currentColor");
-        icon.style.marginBottom = "1rem";
-        icon.style.opacity = "0.5";
-        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-        path.setAttribute("d", "M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z");
-        icon.appendChild(path);
-
-        const title = document.createElement("h2");
-        title.textContent = "Welcome to Views Asset Manager";
-        title.style.margin = "0 0 0.5rem 0";
-        title.style.fontSize = "1.2rem";
-        title.style.fontWeight = "600";
-        title.style.color = "var(--ae-text-primary)";
-
-        const text = document.createElement("p");
-        text.textContent = "Select a folder from the sidebar to view assets.";
-        text.style.margin = "0 0 2rem 0";
-
-        const credits = document.createElement("div");
-        credits.style.fontSize = "0.85rem";
-        credits.style.opacity = "0.7";
-        credits.style.lineHeight = "1.6";
-        credits.innerHTML = `
-            <p style="margin: 0 0 0.5rem 0">Made by ayvyr, assets by soracrt.</p>
-            <p style="margin: 0">If you have issues, join <a href="#" id="discordLink" style="color: var(--ae-accent); text-decoration: none; border-bottom: 1px solid transparent;">discord.gg/views</a> and make a ticket.</p>
+        container.innerHTML = `
+            <div class="welcome-screen__hero">
+                <img class="welcome-screen__logo" src="img/logo.png" alt="Views" width="56" height="56" />
+            </div>
+            
+            <h1 class="welcome-screen__title">Welcome</h1>
+            <p class="welcome-screen__subtitle">We're glad you're here! Now go start creating!</p>
+            
+            <div class="welcome-screen__tips">
+                <div class="welcome-screen__tip">
+                    <div class="welcome-screen__tip-icon">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+                        </svg>
+                    </div>
+                    <div class="welcome-screen__tip-text">
+                        <div class="welcome-screen__tip-title">Select a Folder</div>
+                        <div class="welcome-screen__tip-desc">Choose from the sidebar or use "All Assets"</div>
+                    </div>
+                </div>
+                <div class="welcome-screen__tip">
+                    <div class="welcome-screen__tip-icon">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                        </svg>
+                    </div>
+                    <div class="welcome-screen__tip-text">
+                        <div class="welcome-screen__tip-title">Favorites</div>
+                        <div class="welcome-screen__tip-desc">Star your favorite assets to access them quickly</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="welcome-screen__credits">
+                <p>Made by <strong>ayvyr</strong> · Assets by <strong>soracrt</strong></p>
+                <p>Need help? Join <a href="#" id="discordLink">discord.gg/views</a></p>
+            </div>
         `;
-
-        container.appendChild(icon);
-        container.appendChild(title);
-        container.appendChild(text);
-        container.appendChild(credits);
 
         elements.grid.appendChild(container);
 
         // Handle external link
         const link = container.querySelector("#discordLink");
         if (link) {
-            link.addEventListener("mouseenter", () => link.style.borderBottomColor = "var(--ae-accent)");
-            link.addEventListener("mouseleave", () => link.style.borderBottomColor = "transparent");
             link.addEventListener("click", (e) => {
                 e.preventDefault();
                 Utils.csInterface.openURLInDefaultBrowser("https://discord.gg/views");
@@ -266,11 +298,14 @@
     const createFolderItem = (folder, depth, hasChildren, onFolderSelect, onToggleExpand) => {
         const li = document.createElement("li");
         li.className = "folder-item";
+        if (depth > 0) {
+            li.classList.add("folder-item--sub");
+        }
         li.dataset.folderId = folder.id;
         if (folder.parentId) {
             li.dataset.parentId = folder.parentId;
         }
-        li.style.paddingLeft = `${8 + (depth * 16)}px`;
+        li.style.paddingLeft = `${10 + (depth * 16)}px`;
         
         // Expand/collapse toggle (only if has children)
         if (hasChildren) {
@@ -1355,6 +1390,7 @@
     global.Views.UI = {
         elements,
         LoadingOverlay,
+        SyncModal,
         setStatus,
         setLoading,
         renderWelcomeScreen,

@@ -197,12 +197,16 @@
      * Fetches ALL assets from the API to allow client-side filtering.
      * Uses preloaded data if available.
      * @param {Object} callbacks - Event callbacks for asset rendering
+     * @param {boolean} showSyncModal - Whether to show the sync modal (for initial load)
      */
-    const syncAssets = async (callbacks) => {
+    const syncAssets = async (callbacks, showSyncModal = false) => {
         const state = State.getState();
         const currentSession = State.incrementFetchSession();
 
-        if (!state.isWelcome) {
+        // Show sync modal for initial load, regular loading for subsequent syncs
+        if (showSyncModal) {
+            UI.SyncModal.show();
+        } else if (!state.isWelcome) {
             UI.setLoading(true);
         }
 
@@ -210,7 +214,10 @@
             let allFetched = null;
 
             if (state.preloadPromise) {
-                if (!state.isWelcome) {
+                if (showSyncModal) {
+                    UI.SyncModal.setStatus("Loading assets...");
+                    UI.SyncModal.setProgress(10);
+                } else if (!state.isWelcome) {
                     UI.setStatus("Loading assets...", "info");
                 }
                 log("Waiting for preloaded assets...");
@@ -219,13 +226,19 @@
 
                 if (allFetched) {
                     log(`Using ${allFetched.length} preloaded assets`);
+                    if (showSyncModal) {
+                        UI.SyncModal.setProgress(100);
+                    }
                 } else {
                     log("Preloaded assets unavailable, fetching fresh...");
                 }
             }
 
             if (!allFetched) {
-                if (!state.isWelcome) {
+                if (showSyncModal) {
+                    UI.SyncModal.setStatus("Connecting to server...");
+                    UI.SyncModal.setProgress(5);
+                } else if (!state.isWelcome) {
                     UI.setStatus("Connecting to server...", "info");
                 }
 
@@ -241,8 +254,12 @@
                 total = data.total || 0;
 
                 const totalPages = Math.ceil(total / limit);
+                const progressPerPage = 90 / Math.max(totalPages, 1);
 
-                if (!state.isWelcome) {
+                if (showSyncModal) {
+                    UI.SyncModal.setStatus(`Loading assets (${allFetched.length}/${total})...`);
+                    UI.SyncModal.setProgress(10 + progressPerPage);
+                } else if (!state.isWelcome) {
                     UI.setStatus(`Loading assets (${allFetched.length}/${total})...`, "info");
                 }
 
@@ -259,7 +276,12 @@
                             const result = await promise;
                             loadedPages++;
                             const loaded = Math.min(loadedPages * limit, total);
-                            if (!state.isWelcome) {
+                            const progress = 10 + (loadedPages * progressPerPage);
+                            
+                            if (showSyncModal) {
+                                UI.SyncModal.setStatus(`Loading assets (${loaded}/${total})...`);
+                                UI.SyncModal.setProgress(progress);
+                            } else if (!state.isWelcome) {
                                 UI.setStatus(`Loading assets (${loaded}/${total})...`, "info");
                             }
                             return result;
@@ -281,6 +303,14 @@
 
             updateFolderCounts();
 
+            if (showSyncModal) {
+                UI.SyncModal.setStatus(`${state.allAssets.length} assets loaded!`);
+                UI.SyncModal.setProgress(100);
+                // Brief delay to show completion before hiding
+                await new Promise(resolve => setTimeout(resolve, 500));
+                UI.SyncModal.hide();
+            }
+            
             UI.setStatus(`${state.allAssets.length} assets loaded`, "success");
 
             if (!state.isWelcome) {
@@ -289,6 +319,11 @@
 
         } catch (error) {
             console.error("Failed to sync assets", error);
+            if (showSyncModal) {
+                UI.SyncModal.setStatus("Failed to sync. Check connection.");
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                UI.SyncModal.hide();
+            }
             if (!state.isWelcome) {
                 UI.setStatus("Failed to sync assets. Check your connection.", "error");
             }

@@ -366,3 +366,80 @@
     color: var(--ae-text-muted);
 }
 
+/* Sync Modal */
+.sync-modal {
+    text-align: center;
+    padding: 36px 28px;
+    max-width: 380px;
+}
+
+.sync-modal__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 88px;
+    height: 88px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--ae-accent-soft) 0%, rgba(0, 163, 224, 0.05) 100%);
+    color: var(--ae-accent);
+    margin-bottom: 24px;
+    animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.sync-modal__icon svg {
+    animation: spin 3s linear infinite;
+}
+
+.sync-modal__title {
+    margin: 0 0 12px 0;
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--ae-text-primary);
+}
+
+.sync-modal__description {
+    margin: 0 0 24px 0;
+    font-size: 14px;
+    color: var(--ae-text-secondary);
+    line-height: 1.6;
+    min-height: 22px;
+}
+
+.sync-modal__progress {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.sync-progress-bar {
+    flex: 1;
+    height: 6px;
+    background-color: var(--ae-bg-dark);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.sync-progress-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--ae-accent) 0%, #0091c7 100%);
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+
+.sync-progress-text {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ae-accent);
+    font-family: "SF Mono", "Monaco", "Consolas", monospace;
+    min-width: 36px;
+    text-align: right;
+}
+
+.sync-modal__note {
+    margin: 0;
+    font-size: 11px;
+    color: var(--ae-text-muted);
+}
+

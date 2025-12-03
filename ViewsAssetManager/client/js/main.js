@@ -632,7 +632,8 @@
 
             UI.renderWelcomeScreen();
 
-            AssetController.syncAssets(getAssetCallbacks());
+            // Show sync modal on initial load
+            AssetController.syncAssets(getAssetCallbacks(), true);
 
             startVersionCheckInterval();
 
