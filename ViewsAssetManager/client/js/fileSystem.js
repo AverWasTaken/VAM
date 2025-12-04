@@ -11,6 +11,58 @@
     const log = Utils ? Utils.log : console.log;
 
     /**
+     * Gets the cache folder path
+     * @returns {string} Path to the cache folder
+     */
+    const getCacheFolderPath = () => {
+        if (typeof require === "function") {
+            const path = require("path");
+            const os = require("os");
+            return path.join(os.homedir(), "Documents", "ViewsAssetManager", "cache");
+        }
+        return "Documents/ViewsAssetManager/cache";
+    };
+
+    /**
+     * Checks if the cache folder exists
+     * @returns {boolean} True if the folder exists
+     */
+    const cacheExists = () => {
+        if (typeof require === "function") {
+            const fs = require("fs");
+            return fs.existsSync(getCacheFolderPath());
+        }
+        return false;
+    };
+
+    /**
+     * Checks if this is the first time creating the cache folder and shows notice if needed.
+     * Should be called before first download.
+     */
+    const checkAndNotifyCacheCreation = () => {
+        const Preferences = global.Views.Preferences;
+        const UI = global.Views.UI;
+
+        if (!Preferences || !UI) {
+            log("Preferences or UI not available for cache notice check");
+            return;
+        }
+
+        if (Preferences.hasCacheNoticeSeen()) {
+            return;
+        }
+
+        if (!cacheExists()) {
+            log("Cache folder will be created - showing notice to user");
+            const displayPath = getCacheFolderPath().replace(/\\/g, "/");
+            UI.CacheNoticeModal.show(displayPath);
+            Preferences.setCacheNoticeSeen();
+        } else {
+            Preferences.setCacheNoticeSeen();
+        }
+    };
+
+    /**
      * Loads the PNG into an HTML Canvas and re-exports it.
      * This "sanitizes" the PNG, fixing corruption, CMYK issues, or weird compression that AE hates.
      */
@@ -83,12 +135,14 @@
 
             return new Promise((resolve, reject) => {
                 try {
-                    const tempDir = path.join(os.tmpdir(), "ViewsAssetManager");
-                    if (!fs.existsSync(tempDir)) {
-                        fs.mkdirSync(tempDir, { recursive: true });
+                    // Use Documents folder for permanent storage (matches hostscript.jsx getCacheFolder)
+                    // This prevents files from being deleted by OS temp cleanup or extension restarts
+                    const documentsDir = path.join(os.homedir(), "Documents", "ViewsAssetManager", "cache");
+                    if (!fs.existsSync(documentsDir)) {
+                        fs.mkdirSync(documentsDir, { recursive: true });
                     }
 
-                    const filePath = path.join(tempDir, safeName);
+                    const filePath = path.join(documentsDir, safeName);
                     const fileStream = fs.createWriteStream(filePath);
                     
                     const makeRequest = (url) => {
@@ -215,10 +269,14 @@
     };
 
     global.Views.FileSystem = {
-        downloadFileToTemp
+        downloadFileToTemp,
+        getCacheFolderPath,
+        cacheExists,
+        checkAndNotifyCacheCreation
     };
 
 })(window);
+
 
 
 
