@@ -14,18 +14,46 @@
     const VERSION_CHECK_INTERVAL_MS = 5 * 60 * 1000;
 
     /**
+     * Asset tab types
+     * @type {Object}
+     */
+    const AssetTab = {
+        PNG: "png",
+        AI: "ai"
+    };
+
+    /**
      * Application state object
      * @type {Object}
      */
     const state = {
+        // Current asset tab (png or ai)
+        currentTab: AssetTab.PNG,
+        // PNG assets
         allAssets: [],
         displayedAssets: [],
         filteredAssets: [],
         searchResults: [],
         selectedAssetIds: [],
         previewAsset: null,
+        // AI assets
+        allAIAssets: [],
+        displayedAIAssets: [],
+        filteredAIAssets: [],
+        searchAIResults: [],
+        selectedAIAssetIds: [],
+        aiVisibleCount: 20,
+        preloadAIPromise: null,
+        aiAssetsSynced: false,
+        // PNG Folders
         folders: [],
         folderMap: {},
+        // AI Folders
+        aiFolders: [],
+        aiFolderMap: {},
+        aiFoldersSynced: false,
+        preloadAIFoldersPromise: null,
+        // Shared folder state
         selectedFolderId: null,
         currentFolderPath: [],
         searchQuery: "",
@@ -126,11 +154,15 @@
     };
 
     /**
-     * Clears preload promises
+     * Clears preload promises (PNG, AI, and folders) and sync flags
      */
     const clearPreloadPromises = () => {
         state.preloadPromise = null;
         state.preloadFoldersPromise = null;
+        state.preloadAIPromise = null;
+        state.preloadAIFoldersPromise = null;
+        state.aiAssetsSynced = false;
+        state.aiFoldersSynced = false;
     };
 
     global.Views.State = {
@@ -145,6 +177,7 @@
         incrementFetchSession,
         clearCache,
         clearPreloadPromises,
+        AssetTab,
         FEEDBACK_WEBHOOK_URL,
         VERSION_CHECK_INTERVAL_MS
     };

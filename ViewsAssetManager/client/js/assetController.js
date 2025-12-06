@@ -73,7 +73,48 @@
     };
 
     /**
-     * Starts background preloading of assets and folders.
+     * Silently preloads all AI assets in background without UI updates.
+     * @returns {Promise<Array|null>} Array of AI assets or null on failure
+     */
+    const preloadAIAssetsInBackground = async () => {
+        try {
+            log("Background preload: Starting AI asset fetch...");
+            const startTime = Date.now();
+
+            let page = 1;
+            const limit = 100;
+            let allFetched = [];
+
+            let data = await API.fetchAIAssets(page, limit);
+            allFetched = [...(data.assets || [])];
+            const total = data.total || 0;
+            const totalPages = Math.ceil(total / limit);
+
+            if (totalPages > 1) {
+                const promises = [];
+                for (let p = 2; p <= totalPages; p++) {
+                    promises.push(API.fetchAIAssets(p, limit));
+                }
+
+                const results = await Promise.all(promises);
+                results.forEach(res => {
+                    if (res.assets) {
+                        allFetched = [...allFetched, ...res.assets];
+                    }
+                });
+            }
+
+            const elapsed = Date.now() - startTime;
+            log(`Background preload: Complete - ${allFetched.length} AI assets in ${elapsed}ms`);
+            return allFetched;
+        } catch (error) {
+            console.error("Background AI preload failed:", error);
+            return null;
+        }
+    };
+
+    /**
+     * Starts background preloading of assets, AI assets, and folders.
      */
     const startBackgroundPreload = () => {
         const state = State.getState();
@@ -81,6 +122,10 @@
             log("Starting background preload...");
             state.preloadPromise = preloadAssetsInBackground();
             state.preloadFoldersPromise = preloadFoldersInBackground();
+        }
+        if (!state.preloadAIPromise) {
+            log("Starting AI background preload...");
+            state.preloadAIPromise = preloadAIAssetsInBackground();
         }
     };
 
@@ -122,6 +167,31 @@
         return assets.filter(asset => {
             const name = (asset.name || asset.id || "").toLowerCase();
             return name.includes(lowerQuery);
+        });
+    };
+
+    /**
+     * Filters AI assets by current folder (only direct folder, not subfolders)
+     * @param {Array} allAIAssets - List of all AI assets
+     * @returns {Array} Filtered AI assets
+     */
+    const filterAIAssetsByFolder = (allAIAssets) => {
+        const state = State.getState();
+        const Preferences = global.Views.Preferences;
+        
+        // Handle favorites folder
+        if (String(state.selectedFolderId) === "favorites") {
+            if (!Preferences) return [];
+            const favoriteIds = Preferences.getFavorites();
+            return allAIAssets.filter(asset => favoriteIds.includes(asset.id));
+        }
+        
+        if (String(state.selectedFolderId) === "all") {
+            return allAIAssets;
+        }
+
+        return allAIAssets.filter(asset => {
+            return String(asset.folderId) === String(state.selectedFolderId);
         });
     };
 
@@ -191,6 +261,42 @@
         });
 
         updateFolderCounts();
+    };
+
+    /**
+     * Updates the displayed AI assets based on selection, search, and pagination
+     * @param {Object} callbacks - Event callbacks for AI asset rendering
+     */
+    const updateAIAssetView = (callbacks) => {
+        const state = State.getState();
+        if (state.isWelcome) return;
+
+        const folderFiltered = filterAIAssetsByFolder(state.allAIAssets);
+        state.filteredAIAssets = folderFiltered;
+
+        const searchFiltered = filterAssetsBySearch(folderFiltered, state.searchQuery);
+        state.searchAIResults = searchFiltered;
+
+        const toShow = searchFiltered.slice(0, state.aiVisibleCount);
+        state.displayedAIAssets = toShow;
+
+        UI.renderAIAssets(toShow, state.selectedFolderId, callbacks, state.searchQuery);
+
+        UI.updateSearchStats(toShow.length, searchFiltered.length, state.searchQuery);
+
+        if (!state.searchQuery && searchFiltered.length > 0) {
+            UI.setStatus(`${folderFiltered.length} AI assets found.`, "success");
+        } else if (state.searchQuery && searchFiltered.length > 0) {
+            UI.setStatus("", "info");
+        }
+
+        UI.updateSelectionBar(state.selectedAIAssetIds.length);
+
+        const hasMore = state.displayedAIAssets.length < state.searchAIResults.length;
+        UI.updateLoadMoreButton(hasMore, () => {
+            state.aiVisibleCount += 20;
+            updateAIAssetView(callbacks);
+        });
     };
 
     /**
@@ -296,7 +402,10 @@
                 }
             }
 
-            if (state.fetchSession !== currentSession) return;
+            if (state.fetchSession !== currentSession) {
+                // Session changed - modal will be hidden in finally block
+                return;
+            }
 
             state.allAssets = allFetched;
             log(`Synced ${state.allAssets.length} assets.`);
@@ -308,7 +417,7 @@
                 UI.SyncModal.setProgress(100);
                 // Brief delay to show completion before hiding
                 await new Promise(resolve => setTimeout(resolve, 500));
-                UI.SyncModal.hide();
+                // Modal will be hidden in finally block
             }
             
             UI.setStatus(`${state.allAssets.length} assets loaded`, "success");
@@ -322,7 +431,7 @@
             if (showSyncModal) {
                 UI.SyncModal.setStatus("Failed to sync. Check connection.");
                 await new Promise(resolve => setTimeout(resolve, 2000));
-                UI.SyncModal.hide();
+                // Modal will be hidden in finally block
             }
             if (!state.isWelcome) {
                 UI.setStatus("Failed to sync assets. Check your connection.", "error");
@@ -333,6 +442,162 @@
         } finally {
             if (state.fetchSession === currentSession) {
                 UI.setLoading(false);
+            }
+            // Always ensure sync modal is hidden if we showed it
+            if (showSyncModal) {
+                UI.SyncModal.hide();
+            }
+        }
+    };
+
+    /**
+     * Fetches ALL AI assets from the API to allow client-side filtering.
+     * Uses preloaded data if available.
+     * @param {Object} callbacks - Event callbacks for AI asset rendering
+     * @param {boolean} showSyncModal - Whether to show the sync modal (for initial load)
+     */
+    const syncAIAssets = async (callbacks, showSyncModal = false) => {
+        const state = State.getState();
+        const currentSession = State.incrementFetchSession();
+
+        if (showSyncModal) {
+            UI.SyncModal.show();
+        } else if (!state.isWelcome) {
+            UI.setLoading(true);
+        }
+
+        try {
+            let allFetched = null;
+
+            if (state.preloadAIPromise) {
+                if (showSyncModal) {
+                    UI.SyncModal.setStatus("Loading AI assets...");
+                    UI.SyncModal.setProgress(10);
+                } else if (!state.isWelcome) {
+                    UI.setStatus("Loading AI assets...", "info");
+                }
+                log("Waiting for preloaded AI assets...");
+                allFetched = await state.preloadAIPromise;
+                state.preloadAIPromise = null;
+
+                if (allFetched) {
+                    log(`Using ${allFetched.length} preloaded AI assets`);
+                    if (showSyncModal) {
+                        UI.SyncModal.setProgress(100);
+                    }
+                } else {
+                    log("Preloaded AI assets unavailable, fetching fresh...");
+                }
+            }
+
+            if (!allFetched) {
+                if (showSyncModal) {
+                    UI.SyncModal.setStatus("Connecting to server...");
+                    UI.SyncModal.setProgress(5);
+                } else if (!state.isWelcome) {
+                    UI.setStatus("Connecting to server...", "info");
+                }
+
+                let page = 1;
+                const limit = 100;
+                allFetched = [];
+                let total = 0;
+
+                log(`Syncing AI assets page ${page}...`);
+                let data = await API.fetchAIAssets(page, limit);
+
+                allFetched = [...(data.assets || [])];
+                total = data.total || 0;
+
+                const totalPages = Math.ceil(total / limit);
+                const progressPerPage = 90 / Math.max(totalPages, 1);
+
+                if (showSyncModal) {
+                    UI.SyncModal.setStatus(`Loading AI assets (${allFetched.length}/${total})...`);
+                    UI.SyncModal.setProgress(10 + progressPerPage);
+                } else if (!state.isWelcome) {
+                    UI.setStatus(`Loading AI assets (${allFetched.length}/${total})...`, "info");
+                }
+
+                if (totalPages > 1) {
+                    log(`Fetching ${totalPages - 1} more AI asset pages...`);
+                    const promises = [];
+                    for (let p = 2; p <= totalPages; p++) {
+                        promises.push(API.fetchAIAssets(p, limit));
+                    }
+
+                    let loadedPages = 1;
+                    const results = await Promise.all(
+                        promises.map(async (promise) => {
+                            const result = await promise;
+                            loadedPages++;
+                            const loaded = Math.min(loadedPages * limit, total);
+                            const progress = 10 + (loadedPages * progressPerPage);
+                            
+                            if (showSyncModal) {
+                                UI.SyncModal.setStatus(`Loading AI assets (${loaded}/${total})...`);
+                                UI.SyncModal.setProgress(progress);
+                            } else if (!state.isWelcome) {
+                                UI.setStatus(`Loading AI assets (${loaded}/${total})...`, "info");
+                            }
+                            return result;
+                        })
+                    );
+
+                    results.forEach(res => {
+                        if (res.assets) {
+                            allFetched = [...allFetched, ...res.assets];
+                        }
+                    });
+                }
+            }
+
+            if (state.fetchSession !== currentSession) {
+                // Session changed - modal will be hidden in finally block
+                return;
+            }
+
+            state.allAIAssets = allFetched || [];
+            state.aiAssetsSynced = true;
+            log(`Synced ${state.allAIAssets.length} AI assets.`);
+
+            if (showSyncModal) {
+                if (state.allAIAssets.length === 0) {
+                    UI.SyncModal.setStatus("No AI assets available");
+                } else {
+                    UI.SyncModal.setStatus(`${state.allAIAssets.length} AI assets loaded!`);
+                }
+                UI.SyncModal.setProgress(100);
+                await new Promise(resolve => setTimeout(resolve, 500));
+                // Modal will be hidden in finally block
+            }
+            
+            UI.setStatus(`${state.allAIAssets.length} AI assets loaded`, "success");
+
+            if (!state.isWelcome) {
+                updateAIAssetView(callbacks);
+            }
+
+        } catch (error) {
+            console.error("Failed to sync AI assets", error);
+            if (showSyncModal) {
+                UI.SyncModal.setStatus("Failed to sync AI assets. Check connection.");
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                // Modal will be hidden in finally block
+            }
+            if (!state.isWelcome) {
+                UI.setStatus("Failed to sync AI assets. Check your connection.", "error");
+            }
+            if (state.fetchSession === currentSession && !state.isWelcome) {
+                UI.renderAIAssets([], state.selectedFolderId, callbacks);
+            }
+        } finally {
+            if (state.fetchSession === currentSession) {
+                UI.setLoading(false);
+            }
+            // Always ensure sync modal is hidden if we showed it
+            if (showSyncModal) {
+                UI.SyncModal.hide();
             }
         }
     };
@@ -440,6 +705,122 @@
                 errorMessage = `Failed to import ${displayName}: File appears to be corrupted or invalid. Report this issue in a ticket on discord.gg/views`;
             } else if (errorMessage.includes("couldn't be open")) {
                 errorMessage = `File is locked or in use. Please try again in a moment.`;
+            }
+
+            UI.setStatus(errorMessage, "error");
+        } finally {
+            UI.LoadingOverlay.hide();
+            button.disabled = false;
+        }
+    };
+
+    /**
+     * Handles AI asset download and import into After Effects as a composition
+     * @param {Object} asset - The AI asset to download
+     * @param {HTMLElement} button - The button element that triggered the download
+     */
+    const handleAIAssetDownload = async (asset, button) => {
+        const displayName = Utils.getDisplayName(asset.name || asset.id);
+
+        try {
+            const hasComp = await Utils.evalScript("getActiveComp() !== null");
+            if (hasComp === "false" || hasComp === false) {
+                UI.setStatus("Please open or select a composition first.", "error");
+                return;
+            }
+        } catch (compCheckError) {
+            log("Composition check failed:", compCheckError);
+            UI.setStatus("Please open or select a composition first.", "error");
+            return;
+        }
+
+        UI.LoadingOverlay.show(`Downloading ${displayName}`, "Starting download...");
+        button.disabled = true;
+
+        try {
+            log("Starting import for AI asset:", asset.id);
+
+            const payload = await API.requestAIAssetDownload(asset.id);
+            if (!payload.url) {
+                throw new Error("API did not provide a download URL.");
+            }
+
+            // Ensure filename has .ai extension
+            let fileName = Utils.sanitizeFileName(asset.name || "asset.ai");
+            if (!fileName.toLowerCase().endsWith(".ai")) {
+                fileName = fileName + ".ai";
+            }
+
+            const onProgress = (downloaded, total) => {
+                if (total > 0) {
+                    const percent = (downloaded / total) * 100;
+                    const sizeMB = (total / 1024 / 1024).toFixed(1);
+                    const downloadedMB = (downloaded / 1024 / 1024).toFixed(1);
+                    UI.LoadingOverlay.update(`${downloadedMB} MB / ${sizeMB} MB`);
+                    UI.LoadingOverlay.showProgress(percent);
+                }
+            };
+
+            const importPath = await FS.downloadAIFileToCache(payload.url, fileName, {}, onProgress);
+
+            await new Promise(resolve => setTimeout(resolve, 100));
+
+            UI.LoadingOverlay.show(`Importing ${displayName}`, "Adding as composition...");
+            UI.LoadingOverlay.hideProgress();
+
+            log("Importing AI asset into After Effects from:", importPath);
+
+            let attempts = 0;
+            const maxAttempts = 5;
+            let result;
+
+            while (attempts < maxAttempts) {
+                try {
+                    if (attempts > 0) {
+                        const delay = 500 * attempts;
+                        log(`Waiting ${delay}ms before retry attempt ${attempts + 1}...`);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                    }
+
+                    result = await Utils.evalScript(
+                        `importAIAsset("${Utils.escapeForEval(importPath)}")`
+                    );
+
+                    if (result && typeof result === "string" &&
+                       (result.includes("couldn't be open") || result.includes("File exists") || result.includes("I/O error"))) {
+                        throw new Error(result);
+                    }
+
+                    if (result && result.indexOf("Error") === 0) {
+                        break;
+                    }
+
+                    break;
+                } catch (e) {
+                    attempts++;
+                    log(`AI Import attempt ${attempts} failed (${e.message}), retrying...`);
+                    if (attempts >= maxAttempts) {
+                        result = "Error: " + e.message;
+                    }
+                }
+            }
+
+            if (result && result.indexOf("Error") === 0) {
+                throw new Error(result);
+            }
+
+            log("AI Asset imported successfully:", asset.id);
+            UI.setStatus(result || `${displayName || "AI Asset"} imported as composition.`, "success");
+        } catch (error) {
+            console.error("AI Import failed", error);
+
+            let errorMessage = error.message || "Unable to import AI asset.";
+
+            if (errorMessage.includes("corrupted") || errorMessage.includes("not of the correct type") ||
+                errorMessage.includes("Import failed")) {
+                errorMessage = `Failed to import ${displayName}: AI file appears to be corrupted or invalid. Report this issue in a ticket on discord.gg/views`;
+            } else if (errorMessage.includes("couldn't be open")) {
+                errorMessage = `AI file is locked or in use. Please try again in a moment.`;
             }
 
             UI.setStatus(errorMessage, "error");
@@ -673,26 +1054,181 @@
         }
     };
 
+    /**
+     * Loads more AI assets for infinite scroll (appends without re-rendering)
+     * @param {Object} callbacks - AI Asset callbacks
+     */
+    const loadMoreAIAssets = (callbacks) => {
+        const state = State.getState();
+        const currentCount = state.displayedAIAssets.length;
+        
+        if (currentCount < state.searchAIResults.length) {
+            const newCount = Math.min(currentCount + 20, state.searchAIResults.length);
+            const newAssets = state.searchAIResults.slice(currentCount, newCount);
+            
+            // Update state
+            state.aiVisibleCount = newCount;
+            state.displayedAIAssets = state.searchAIResults.slice(0, newCount);
+            
+            // Append only the new assets (no re-render)
+            UI.appendAIAssets(newAssets, callbacks, currentCount);
+            
+            // Update stats
+            UI.updateSearchStats(state.displayedAIAssets.length, state.searchAIResults.length, state.searchQuery);
+            
+            // Hide load more button if no more
+            const hasMore = state.displayedAIAssets.length < state.searchAIResults.length;
+            UI.updateLoadMoreButton(hasMore, () => loadMoreAIAssets(callbacks));
+            
+            log(`Loaded ${newAssets.length} more AI assets (${state.displayedAIAssets.length}/${state.searchAIResults.length})`);
+        }
+    };
+
+    /**
+     * Handles AI asset selection toggle
+     * @param {Object} asset - The AI asset to toggle
+     * @param {HTMLElement} card - The card element
+     */
+    const handleAIAssetSelect = (asset, card) => {
+        const state = State.getState();
+        const idx = state.selectedAIAssetIds.indexOf(asset.id);
+        if (idx === -1) {
+            state.selectedAIAssetIds.push(asset.id);
+            UI.toggleCardSelection(asset.id, true);
+        } else {
+            state.selectedAIAssetIds.splice(idx, 1);
+            UI.toggleCardSelection(asset.id, false);
+        }
+        UI.updateSelectionBar(state.selectedAIAssetIds.length);
+        log(`AI Selection: ${state.selectedAIAssetIds.length} assets selected`);
+    };
+
+    /**
+     * Clears all selected AI assets
+     */
+    const clearAISelection = () => {
+        const state = State.getState();
+        state.selectedAIAssetIds.forEach(id => {
+            UI.toggleCardSelection(id, false);
+        });
+        state.selectedAIAssetIds = [];
+        UI.updateSelectionBar(0);
+        log("AI Selection cleared.");
+    };
+
+    /**
+     * Gets the list of selected AI asset IDs
+     * @returns {Array<string>} Selected AI asset IDs
+     */
+    const getSelectedAIIds = () => State.getState().selectedAIAssetIds;
+
+    /**
+     * Imports multiple selected AI assets sequentially
+     */
+    const handleImportSelectedAI = async () => {
+        const state = State.getState();
+        if (state.selectedAIAssetIds.length === 0) return;
+
+        try {
+            const hasComp = await Utils.evalScript("getActiveComp() !== null");
+            if (hasComp === "false" || hasComp === false) {
+                UI.setStatus("Please open or select a composition first.", "error");
+                return;
+            }
+        } catch (compCheckError) {
+            log("Composition check failed:", compCheckError);
+            UI.setStatus("Please open or select a composition first.", "error");
+            return;
+        }
+
+        const selectedAssets = state.allAIAssets.filter(a => state.selectedAIAssetIds.includes(a.id));
+        const total = selectedAssets.length;
+        let imported = 0;
+        let failed = 0;
+
+        UI.LoadingOverlay.show(`Importing ${total} AI assets`, "Starting batch import...");
+
+        for (const asset of selectedAssets) {
+            const displayName = Utils.getDisplayName(asset.name || asset.id);
+
+            try {
+                UI.LoadingOverlay.update(`Importing ${displayName} (${imported + 1}/${total})...`);
+                UI.LoadingOverlay.showProgress(((imported) / total) * 100);
+
+                log(`AI Batch import: Starting ${asset.id}`);
+
+                const payload = await API.requestAIAssetDownload(asset.id);
+                if (!payload.url) {
+                    throw new Error("API did not provide a download URL.");
+                }
+
+                // Ensure filename has .ai extension
+                let fileName = Utils.sanitizeFileName(asset.name || "asset.ai");
+                if (!fileName.toLowerCase().endsWith(".ai")) {
+                    fileName = fileName + ".ai";
+                }
+                const importPath = await FS.downloadAIFileToCache(payload.url, fileName, {});
+
+                await new Promise(resolve => setTimeout(resolve, 100));
+
+                const result = await Utils.evalScript(
+                    `importAIAsset("${Utils.escapeForEval(importPath)}")`
+                );
+
+                if (result && result.indexOf("Error") === 0) {
+                    throw new Error(result);
+                }
+
+                imported++;
+                log(`AI Batch import: Completed ${asset.id}`);
+
+            } catch (error) {
+                failed++;
+                console.error(`Failed to import AI ${displayName}:`, error);
+                log(`AI Batch import: Failed ${asset.id} - ${error.message}`);
+            }
+        }
+
+        UI.LoadingOverlay.hide();
+        clearAISelection();
+
+        if (failed === 0) {
+            UI.setStatus(`Successfully imported ${imported} AI assets as compositions.`, "success");
+        } else {
+            UI.setStatus(`Imported ${imported} AI assets, ${failed} failed.`, failed === total ? "error" : "info");
+        }
+    };
+
     global.Views.AssetController = {
         preloadAssetsInBackground,
         preloadFoldersInBackground,
+        preloadAIAssetsInBackground,
         startBackgroundPreload,
         filterAssetsByFolder,
+        filterAIAssetsByFolder,
         filterAssetsBySearch,
         updateFolderCounts,
         updateAssetView,
+        updateAIAssetView,
         syncAssets,
+        syncAIAssets,
         handleAssetDownload,
+        handleAIAssetDownload,
         handleAssetPreview,
         previewPrevAsset,
         previewNextAsset,
         updatePreviewNavState,
         handleAssetSelect,
+        handleAIAssetSelect,
         clearSelection,
+        clearAISelection,
         getSelectedIds,
+        getSelectedAIIds,
         handleImportSelected,
+        handleImportSelectedAI,
         handleFavoriteToggle,
-        loadMoreAssets
+        loadMoreAssets,
+        loadMoreAIAssets
     };
 
 })(window);

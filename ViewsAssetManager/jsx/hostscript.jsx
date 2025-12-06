@@ -131,6 +131,11 @@
         }
     }
 
+    /**
+     * Imports a PNG asset as footage and adds it to the active composition
+     * @param {string} filePath - Path to the PNG file
+     * @returns {string} Success or error message
+     */
     function importAndAddAsset(filePath) {
         var undoOpened = false;
         try {
@@ -194,7 +199,95 @@
         }
     }
 
+    /**
+     * Imports an AI (Adobe Illustrator) file as a composition so it remains editable
+     * @param {string} filePath - Path to the AI file
+     * @returns {string} Success or error message
+     */
+    function importAIAsset(filePath) {
+        var undoOpened = false;
+        try {
+            if (!filePath) {
+                throw new Error("File path is required.");
+            }
+
+            var file = new File(filePath);
+            if (!file.exists) {
+                throw new Error("AI file not found: " + filePath);
+            }
+            
+            // Verify file can be opened and has content
+            if (file.length === 0) {
+                throw new Error("AI file is empty or corrupted: " + filePath);
+            }
+
+            if (!app.project) {
+                app.newProject();
+            }
+
+            var comp = getActiveComp();
+            if (!comp) {
+                throw new Error("Open or select an active composition.");
+            }
+
+            var importOptions = new ImportOptions(file);
+            
+            // Import AI files as compositions to keep them editable
+            if (importOptions.canImportAs(ImportAsType.COMP)) {
+                importOptions.importAs = ImportAsType.COMP;
+            } else if (importOptions.canImportAs(ImportAsType.COMP_CROPPED_LAYERS)) {
+                importOptions.importAs = ImportAsType.COMP_CROPPED_LAYERS;
+            } else {
+                throw new Error("Cannot import AI file as composition. File may be unsupported.");
+            }
+
+            app.beginUndoGroup("Views AI Asset Import");
+            undoOpened = true;
+
+            var importedItem = app.project.importFile(importOptions);
+            
+            // Validate that import was successful
+            if (!importedItem) {
+                throw new Error("Import failed - AI file may be corrupted or invalid.");
+            }
+
+            // If it's a composition, add it as a layer to the active comp
+            // importedItem could be a CompItem or a folder containing a comp
+            var importedComp = null;
+            
+            if (importedItem instanceof CompItem) {
+                importedComp = importedItem;
+            } else if (importedItem instanceof FolderItem) {
+                // Find the composition inside the folder
+                for (var i = 1; i <= importedItem.numItems; i++) {
+                    if (importedItem.item(i) instanceof CompItem) {
+                        importedComp = importedItem.item(i);
+                        break;
+                    }
+                }
+            }
+            
+            if (importedComp) {
+                // Add the imported composition as a layer in the active composition
+                var layer = comp.layers.add(importedComp);
+                centerLayer(layer, comp);
+                log("Imported AI asset as composition: " + file.fsName);
+                return "AI asset imported as composition.";
+            } else {
+                log("Imported AI asset (no layer added): " + file.fsName);
+                return "AI asset imported to project.";
+            }
+        } catch (error) {
+            var message = error && error.message ? error.message : error.toString();
+            log("importAIAsset error: " + message);
+            return "Error: " + message;
+        } finally {
+            ensureUndoEnded(undoOpened);
+        }
+    }
+
     $.global.importAndAddAsset = importAndAddAsset;
+    $.global.importAIAsset = importAIAsset;
     $.global.getActiveComp = getActiveComp;
     $.global.saveToTemp = saveToTemp;
 })();

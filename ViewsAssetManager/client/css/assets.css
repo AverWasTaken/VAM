@@ -3,6 +3,59 @@
  * Search, grid, cards, skeleton loading
  */
 
+/* Asset Type Tabs */
+.asset-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 16px;
+    background-color: var(--ae-bg-card);
+    border: 1px solid var(--ae-border-subtle);
+    border-radius: var(--radius-md);
+    padding: 4px;
+}
+
+.asset-tab {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    flex: 1;
+    padding: 10px 16px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--ae-text-muted);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.asset-tab:hover {
+    background-color: var(--ae-bg-elevated);
+    color: var(--ae-text-secondary);
+}
+
+.asset-tab--active {
+    background: linear-gradient(135deg, var(--ae-accent) 0%, #0091c7 100%);
+    color: #000;
+    box-shadow: 0 2px 8px rgba(0, 163, 224, 0.3);
+}
+
+.asset-tab--active:hover {
+    background: linear-gradient(135deg, var(--ae-accent) 0%, #0091c7 100%);
+    color: #000;
+}
+
+.asset-tab svg {
+    flex-shrink: 0;
+    opacity: 0.8;
+}
+
+.asset-tab--active svg {
+    opacity: 1;
+}
+
 /* Search Bar Styles */
 .search-container {
     margin-bottom: 20px;
@@ -725,5 +778,60 @@
     width: 100%;
     grid-column: 1 / -1;
     pointer-events: none;
+}
+
+/* AI Asset Card (no thumbnail) */
+.asset-card--ai {
+    min-height: 140px;
+}
+
+.asset-card--ai .asset-card__icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: linear-gradient(135deg, #ff9a00 0%, #ff6b00 100%);
+    border-radius: var(--radius-sm);
+    color: #fff;
+    transition: all var(--transition);
+}
+
+.asset-card--ai:hover .asset-card__icon {
+    transform: scale(1.05);
+}
+
+.asset-card--ai .asset-card__icon svg {
+    width: 32px;
+    height: 32px;
+    opacity: 0.9;
+}
+
+.asset-card--ai .asset-card__type-badge {
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(4px);
+    color: #ff9a00;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 4px 8px;
+    border-radius: 4px;
+    letter-spacing: 0.5px;
+    z-index: 5;
+}
+
+/* Small grid - AI cards */
+.asset-grid--small .asset-card--ai .asset-card__icon svg {
+    width: 24px;
+    height: 24px;
+}
+
+/* Large grid - AI cards */
+.asset-grid--large .asset-card--ai .asset-card__icon svg {
+    width: 40px;
+    height: 40px;
 }
 

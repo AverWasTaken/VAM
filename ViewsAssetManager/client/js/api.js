@@ -335,15 +335,59 @@
     };
 
     /**
-     * Requests a presigned download URL for an asset
+     * Requests a presigned download URL for a PNG asset
+     * @param {string} assetId - The asset ID
+     * @returns {Promise<{url: string}>} Download URL response
      */
     const requestAssetDownload = async (assetId) => {
         if (!assetId) {
             throw new Error("Asset id missing.");
         }
         const encodedId = encodeURIComponent(assetId);
-        log(`Requesting download for asset: ${assetId} (encoded: ${encodedId})`);
+        log(`Requesting download for PNG asset: ${assetId} (encoded: ${encodedId})`);
         return fetchJson(`/assets/${encodedId}/download`);
+    };
+
+    /**
+     * Requests a presigned download URL for an AI asset
+     * @param {string} assetId - The AI asset ID
+     * @returns {Promise<{url: string}>} Download URL response
+     */
+    const requestAIAssetDownload = async (assetId) => {
+        if (!assetId) {
+            throw new Error("AI Asset id missing.");
+        }
+        const encodedId = encodeURIComponent(assetId);
+        log(`Requesting download for AI asset: ${assetId} (encoded: ${encodedId})`);
+        return fetchJson(`/assets/ai/${encodedId}/download`);
+    };
+
+    /**
+     * Fetches all AI assets (paginated) from the API
+     * @param {number} page - Page number
+     * @param {number} limit - Number of items per page
+     * @returns {Promise<{assets: Array, total: number}>} AI assets response
+     */
+    const fetchAIAssets = async (page = 1, limit = 100) => {
+        log(`Fetching AI assets page ${page}, limit ${limit}...`);
+        return fetchJson(`/assets/ai?page=${page}&limit=${limit}`);
+    };
+
+    /**
+     * Fetches all AI folders from the API
+     * @returns {Promise<Array>} Array of AI folder objects
+     */
+    const fetchAIFolders = async () => {
+        try {
+            log("Fetching AI folders.");
+            const data = await fetchJson("/folders/ai");
+            const folders = Array.isArray(data) ? data : data.folders || [];
+            log(`Loaded ${folders.length} AI folders.`);
+            return folders;
+        } catch (error) {
+            console.error("Failed to load AI folders", error);
+            return [];
+        }
     };
 
     /**
@@ -412,6 +456,9 @@
         getChildFolders,
         getFolderPath,
         requestAssetDownload,
+        requestAIAssetDownload,
+        fetchAIAssets,
+        fetchAIFolders,
         fetchVersion,
         getExpectedVersion,
         isUpdateRequired

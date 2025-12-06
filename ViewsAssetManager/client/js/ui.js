@@ -23,6 +23,9 @@
         searchInput: document.getElementById("searchInput"),
         clearSearchBtn: document.getElementById("clearSearchBtn"),
         searchStats: document.getElementById("searchStats"),
+        // Asset type tabs
+        tabPNG: document.getElementById("tabPNG"),
+        tabAI: document.getElementById("tabAI"),
         // Breadcrumb navigation
         breadcrumbNav: document.getElementById("breadcrumbNav"),
         breadcrumbList: document.getElementById("breadcrumbList"),
@@ -751,6 +754,153 @@
     };
 
     /**
+     * Creates an AI asset card element for the grid (no thumbnail, uses icon instead)
+     * @param {Object} asset - Asset data from API (id, name, size, uploadDate)
+     * @param {Object} callbacks - Callbacks object with onImport, onSelect, onFavorite
+     * @returns {HTMLElement} Article element containing the AI asset card
+     */
+    const createAIAssetCard = (asset, callbacks) => {
+        const { onImport, onSelect, onFavorite, isSelected } = callbacks;
+        const Preferences = global.Views.Preferences;
+        
+        const card = document.createElement("article");
+        card.className = "asset-card asset-card--ai" + (isSelected ? " asset-card--selected" : "");
+        card.dataset.assetId = asset.id;
+        const displayName = Utils.getDisplayName(asset.name || asset.id);
+
+        // Selection checkbox
+        const checkbox = document.createElement("div");
+        checkbox.className = "asset-card__select";
+        checkbox.title = "Select for batch import";
+        const checkIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        checkIcon.setAttribute("width", "12");
+        checkIcon.setAttribute("height", "12");
+        checkIcon.setAttribute("viewBox", "0 0 16 16");
+        checkIcon.setAttribute("fill", "currentColor");
+        const checkPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        checkPath.setAttribute("d", "M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z");
+        checkIcon.appendChild(checkPath);
+        checkbox.appendChild(checkIcon);
+        checkbox.addEventListener("click", (e) => {
+            e.stopPropagation();
+            if (onSelect) onSelect(asset, card);
+        });
+
+        // Favorite button
+        const isFavorited = Preferences && Preferences.isFavorite(asset.id);
+        const favoriteBtn = document.createElement("button");
+        favoriteBtn.type = "button";
+        favoriteBtn.className = "asset-card__favorite" + (isFavorited ? " asset-card__favorite--active" : "");
+        favoriteBtn.title = isFavorited ? "Remove from favorites" : "Add to favorites";
+        const starIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        starIcon.setAttribute("width", "14");
+        starIcon.setAttribute("height", "14");
+        starIcon.setAttribute("viewBox", "0 0 24 24");
+        starIcon.setAttribute("fill", isFavorited ? "currentColor" : "none");
+        starIcon.setAttribute("stroke", "currentColor");
+        starIcon.setAttribute("stroke-width", "2");
+        const starPath = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+        starPath.setAttribute("points", "12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2");
+        starIcon.appendChild(starPath);
+        favoriteBtn.appendChild(starIcon);
+        favoriteBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            if (Preferences) {
+                const nowFavorited = Preferences.toggleFavorite(asset.id);
+                favoriteBtn.classList.toggle("asset-card__favorite--active", nowFavorited);
+                favoriteBtn.title = nowFavorited ? "Remove from favorites" : "Add to favorites";
+                starIcon.setAttribute("fill", nowFavorited ? "currentColor" : "none");
+                if (onFavorite) onFavorite(asset, nowFavorited);
+            }
+        });
+
+        // AI icon instead of thumbnail
+        const iconContainer = document.createElement("div");
+        iconContainer.className = "asset-card__icon";
+        iconContainer.style.cursor = "pointer";
+        const aiIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        aiIcon.setAttribute("viewBox", "0 0 24 24");
+        aiIcon.setAttribute("fill", "none");
+        aiIcon.setAttribute("stroke", "currentColor");
+        aiIcon.setAttribute("stroke-width", "2");
+        aiIcon.setAttribute("stroke-linecap", "round");
+        aiIcon.setAttribute("stroke-linejoin", "round");
+        // Layers icon representing vector/composition
+        const aiPath1 = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+        aiPath1.setAttribute("points", "12 2 2 7 12 12 22 7 12 2");
+        const aiPath2 = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+        aiPath2.setAttribute("points", "2 17 12 22 22 17");
+        const aiPath3 = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+        aiPath3.setAttribute("points", "2 12 12 17 22 12");
+        aiIcon.appendChild(aiPath1);
+        aiIcon.appendChild(aiPath2);
+        aiIcon.appendChild(aiPath3);
+        iconContainer.appendChild(aiIcon);
+
+        // Double-click on icon imports
+        iconContainer.addEventListener("dblclick", (e) => {
+            e.preventDefault();
+            const importBtnEl = card.querySelector(".asset-card__cta:not(.asset-card__cta--preview)");
+            if (onImport && importBtnEl) onImport(asset, importBtnEl);
+        });
+
+        // Type badge
+        const typeBadge = document.createElement("span");
+        typeBadge.className = "asset-card__type-badge";
+        typeBadge.textContent = ".AI";
+
+        const title = document.createElement("p");
+        title.className = "asset-card__title";
+        title.textContent = displayName || "Untitled asset";
+        title.title = displayName;
+
+        // Actions container (no preview button for AI files)
+        const actions = document.createElement("div");
+        actions.className = "asset-card__actions";
+
+        // Import button
+        const importBtn = document.createElement("button");
+        importBtn.type = "button";
+        importBtn.className = "asset-card__cta";
+        importBtn.textContent = "Import as Comp";
+        importBtn.title = "Import as editable composition";
+        importBtn.addEventListener("click", () => {
+            if (onImport) onImport(asset, importBtn);
+        });
+
+        actions.appendChild(importBtn);
+
+        // Context menu
+        card.addEventListener("contextmenu", (e) => {
+            e.preventDefault();
+            showContextMenu(e.clientX, e.clientY, asset, callbacks);
+        });
+
+        card.appendChild(checkbox);
+        card.appendChild(favoriteBtn);
+        card.appendChild(typeBadge);
+        card.appendChild(iconContainer);
+        card.appendChild(title);
+        card.appendChild(actions);
+        return card;
+    };
+
+    /**
+     * Sets the active tab and updates UI
+     * @param {string} tabId - "png" or "ai"
+     */
+    const setActiveTab = (tabId) => {
+        // Update tab button states
+        if (elements.tabPNG) {
+            elements.tabPNG.classList.toggle("asset-tab--active", tabId === "png");
+        }
+        if (elements.tabAI) {
+            elements.tabAI.classList.toggle("asset-tab--active", tabId === "ai");
+        }
+        log(`Switched to ${tabId.toUpperCase()} tab`);
+    };
+
+    /**
      * Renders assets to the grid
      * @param {Array} assets - Array of asset objects to render
      * @param {string} selectedFolderId - ID of the current folder
@@ -817,6 +967,106 @@
         });
         elements.grid.appendChild(fragment);
         log(`Rendered ${assets.length} assets.`);
+    };
+
+    /**
+     * Renders AI assets to the grid
+     * @param {Array} assets - Array of AI asset objects to render
+     * @param {string} selectedFolderId - ID of the current folder
+     * @param {Object} callbacks - Callbacks object with onImport, onSelect, getSelectedIds
+     * @param {string} [searchQuery] - Optional search query for empty state message
+     */
+    const renderAIAssets = (assets, selectedFolderId, callbacks, searchQuery = "") => {
+        elements.grid.innerHTML = "";
+
+        if (!assets.length) {
+            const empty = document.createElement("div");
+            empty.className = "asset-grid__empty";
+            
+            // Add icon
+            const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+            icon.setAttribute("class", "asset-grid__empty-icon");
+            icon.setAttribute("viewBox", "0 0 24 24");
+            icon.setAttribute("fill", "currentColor");
+            const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            
+            if (searchQuery) {
+                path.setAttribute("d", "M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z");
+            } else {
+                path.setAttribute("d", "M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z");
+            }
+            icon.appendChild(path);
+            empty.appendChild(icon);
+            
+            const text = document.createElement("p");
+            if (searchQuery) {
+                text.textContent = `No AI assets found for "${searchQuery}"`;
+            } else if (selectedFolderId === "all") {
+                text.textContent = "No AI assets available.";
+            } else {
+                text.textContent = "No AI assets in this folder.";
+            }
+            text.style.margin = "0";
+            empty.appendChild(text);
+            
+            if (searchQuery) {
+                const hint = document.createElement("p");
+                hint.textContent = "Try a different search term";
+                hint.style.margin = "4px 0 0 0";
+                hint.style.fontSize = "12px";
+                hint.style.opacity = "0.7";
+                empty.appendChild(hint);
+            }
+            
+            elements.grid.appendChild(empty);
+            return;
+        }
+
+        const selectedIds = callbacks.getSelectedIds ? callbacks.getSelectedIds() : [];
+        const fragment = document.createDocumentFragment();
+        assets.forEach((asset, index) => {
+            const isSelected = selectedIds.includes(asset.id);
+            const card = createAIAssetCard(asset, { ...callbacks, isSelected });
+            const delay = Math.min(index * 30, 500);
+            card.style.animationDelay = `${delay}ms`;
+            fragment.appendChild(card);
+        });
+        elements.grid.appendChild(fragment);
+        log(`Rendered ${assets.length} AI assets.`);
+    };
+
+    /**
+     * Appends additional AI assets to the grid (for infinite scroll)
+     * @param {Array} assets - Array of NEW AI asset objects to append
+     * @param {Object} callbacks - Callbacks object
+     * @param {number} startIndex - Starting index for animation delay
+     */
+    const appendAIAssets = (assets, callbacks, startIndex = 0) => {
+        if (!assets.length) return;
+
+        const selectedIds = callbacks.getSelectedIds ? callbacks.getSelectedIds() : [];
+        const fragment = document.createDocumentFragment();
+        
+        assets.forEach((asset, index) => {
+            const isSelected = selectedIds.includes(asset.id);
+            const card = createAIAssetCard(asset, { ...callbacks, isSelected });
+            const delay = Math.min(index * 20, 200);
+            card.style.animationDelay = `${delay}ms`;
+            fragment.appendChild(card);
+        });
+        
+        const sentinel = document.getElementById("scrollSentinel");
+        if (sentinel) {
+            sentinel.remove();
+        }
+        
+        elements.grid.appendChild(fragment);
+        
+        if (sentinel) {
+            elements.grid.appendChild(sentinel);
+        }
+        
+        log(`Appended ${assets.length} more AI assets.`);
     };
 
     /**
@@ -1441,6 +1691,10 @@
         updateFolderCount,
         renderAssets,
         appendAssets,
+        renderAIAssets,
+        appendAIAssets,
+        createAIAssetCard,
+        setActiveTab,
         renderSkeletons,
         showApiKeyModal,
         hideApiKeyModal,

@@ -10,6 +10,7 @@
     const STORAGE_KEYS = {
         GRID_SIZE: "views_grid_size",
         LAST_FOLDER: "views_last_folder",
+        LAST_AI_FOLDER: "views_last_ai_folder",
         SIDEBAR_COLLAPSED: "views_sidebar_collapsed",
         FAVORITES: "views_favorites",
         CACHE_NOTICE_SEEN: "views_cache_notice_seen"
@@ -61,16 +62,28 @@
     const setGridSize = (size) => set(STORAGE_KEYS.GRID_SIZE, size);
 
     /**
-     * Gets the last selected folder ID
+     * Gets the last selected PNG folder ID
      * @returns {string|null} Folder ID or null
      */
     const getLastFolder = () => get(STORAGE_KEYS.LAST_FOLDER, null);
 
     /**
-     * Saves the last selected folder ID
+     * Saves the last selected PNG folder ID
      * @param {string} folderId - Folder ID to save
      */
     const setLastFolder = (folderId) => set(STORAGE_KEYS.LAST_FOLDER, folderId);
+
+    /**
+     * Gets the last selected AI folder ID
+     * @returns {string|null} AI Folder ID or null
+     */
+    const getLastAIFolder = () => get(STORAGE_KEYS.LAST_AI_FOLDER, null);
+
+    /**
+     * Saves the last selected AI folder ID
+     * @param {string} folderId - AI Folder ID to save
+     */
+    const setLastAIFolder = (folderId) => set(STORAGE_KEYS.LAST_AI_FOLDER, folderId);
 
     /**
      * Gets sidebar collapsed state
@@ -160,6 +173,8 @@
         setGridSize,
         getLastFolder,
         setLastFolder,
+        getLastAIFolder,
+        setLastAIFolder,
         getSidebarCollapsed,
         setSidebarCollapsed,
         getFavorites,

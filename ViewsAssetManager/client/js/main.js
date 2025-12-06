@@ -17,10 +17,11 @@
     const log = Utils.log;
 
     const Preferences = Views.Preferences;
+    const AssetTab = Views.State.AssetTab;
 
     /**
-     * Creates asset rendering callbacks object
-     * @returns {Object} Callbacks for asset rendering
+     * Creates PNG asset rendering callbacks object
+     * @returns {Object} Callbacks for PNG asset rendering
      */
     const getAssetCallbacks = () => ({
         onImport: AssetController.handleAssetDownload,
@@ -33,11 +34,105 @@
     });
 
     /**
-     * Wrapper for selectFolder that provides callbacks
+     * Creates AI asset rendering callbacks object
+     * @returns {Object} Callbacks for AI asset rendering
+     */
+    const getAIAssetCallbacks = () => ({
+        onImport: AssetController.handleAIAssetDownload,
+        onPreview: null, // AI assets don't have preview (no thumbnails)
+        onSelect: AssetController.handleAIAssetSelect,
+        onFavorite: (asset, isFavorited) => {
+            AssetController.handleFavoriteToggle(asset, isFavorited, getAIAssetCallbacks());
+        },
+        getSelectedIds: AssetController.getSelectedAIIds
+    });
+
+    /**
+     * Wrapper for selectFolder that provides callbacks for PNG assets
      * @param {string} folderId - Folder ID to select
      */
     const selectFolder = (folderId) => {
         FolderController.selectFolder(folderId, getAssetCallbacks(), AssetController.updateAssetView);
+    };
+
+    /**
+     * Wrapper for selectAIFolder that provides callbacks for AI assets
+     * @param {string} folderId - Folder ID to select
+     */
+    const selectAIFolder = (folderId) => {
+        FolderController.selectAIFolder(folderId, getAIAssetCallbacks(), AssetController.updateAIAssetView);
+    };
+
+    /**
+     * Switches to the specified asset tab
+     * @param {string} tabId - "png" or "ai"
+     */
+    const switchTab = async (tabId) => {
+        const state = State.getState();
+        
+        // Don't do anything if already on this tab
+        if (state.currentTab === tabId) return;
+        
+        // Don't allow tab switch if on welcome screen
+        if (state.isWelcome) {
+            log("Cannot switch tabs on welcome screen");
+            return;
+        }
+        
+        log(`Switching to ${tabId.toUpperCase()} tab`);
+        state.currentTab = tabId;
+        
+        // Update UI
+        UI.setActiveTab(tabId);
+        
+        // Clear search when switching tabs
+        handleClearSearch();
+        
+        // Reset folder selection to "all" when switching tabs
+        state.selectedFolderId = "all";
+        state.currentFolderPath = [];
+        UI.hideBreadcrumbs();
+        
+        // Reset visible count
+        if (tabId === AssetTab.AI) {
+            state.aiVisibleCount = 20;
+            // Clear PNG selection
+            AssetController.clearSelection();
+            
+            // Load AI folders if not synced
+            if (!state.aiFoldersSynced) {
+                const aiFolders = await FolderController.loadAIFolders();
+                UI.renderFolders(aiFolders, selectAIFolder);
+            } else {
+                UI.renderFolders(state.aiFolders, selectAIFolder);
+            }
+            
+            // Highlight "All Assets" folder
+            UI.elements.folderList.querySelectorAll(".folder-item").forEach((item) => {
+                item.classList.toggle("folder-item--active", item.dataset.folderId === "all");
+            });
+            
+            // If AI assets haven't been synced yet, sync them
+            if (!state.aiAssetsSynced) {
+                await AssetController.syncAIAssets(getAIAssetCallbacks(), true);
+            } else {
+                AssetController.updateAIAssetView(getAIAssetCallbacks());
+            }
+        } else {
+            state.visibleCount = 20;
+            // Clear AI selection
+            AssetController.clearAISelection();
+            
+            // Render PNG folders
+            UI.renderFolders(state.folders, selectFolder);
+            
+            // Highlight "All Assets" folder
+            UI.elements.folderList.querySelectorAll(".folder-item").forEach((item) => {
+                item.classList.toggle("folder-item--active", item.dataset.folderId === "all");
+            });
+            
+            AssetController.updateAssetView(getAssetCallbacks());
+        }
     };
 
     /**
@@ -119,6 +214,7 @@
             const query = UI.getSearchQuery();
             state.searchQuery = query;
             state.visibleCount = 20;
+            state.aiVisibleCount = 20;
 
             // If on welcome screen and user starts searching, switch to "all" view
             if (state.isWelcome && query) {
@@ -130,7 +226,12 @@
                 UI.hideBreadcrumbs();
             }
 
-            AssetController.updateAssetView(getAssetCallbacks());
+            // Update the correct view based on current tab
+            if (state.currentTab === AssetTab.AI) {
+                AssetController.updateAIAssetView(getAIAssetCallbacks());
+            } else {
+                AssetController.updateAssetView(getAssetCallbacks());
+            }
             log(`Search query: "${query}"`);
         }, 200);
 
@@ -145,7 +246,14 @@
         UI.clearSearch();
         state.searchQuery = "";
         state.visibleCount = 20;
-        AssetController.updateAssetView(getAssetCallbacks());
+        state.aiVisibleCount = 20;
+        
+        // Update the correct view based on current tab
+        if (state.currentTab === AssetTab.AI) {
+            AssetController.updateAIAssetView(getAIAssetCallbacks());
+        } else {
+            AssetController.updateAssetView(getAssetCallbacks());
+        }
         log("Search cleared.");
     };
 
@@ -306,21 +414,38 @@
         const state = State.getState();
 
         UI.elements.refreshButton.addEventListener("click", async () => {
+            const state = State.getState();
             log("Manual refresh requested.");
             State.clearCache();
             State.clearPreloadPromises();
             handleClearSearch();
             AssetController.clearSelection();
+            AssetController.clearAISelection();
 
             const versionOk = await checkVersion();
             if (!versionOk) {
                 return;
             }
 
-            const folders = await FolderController.loadFolders();
-            UI.renderFolders(folders, selectFolder);
-            await AssetController.syncAssets(getAssetCallbacks());
+            // Refresh based on current tab
+            if (state.currentTab === AssetTab.AI) {
+                const aiFolders = await FolderController.loadAIFolders();
+                UI.renderFolders(aiFolders, selectAIFolder);
+                await AssetController.syncAIAssets(getAIAssetCallbacks());
+            } else {
+                const folders = await FolderController.loadFolders();
+                UI.renderFolders(folders, selectFolder);
+                await AssetController.syncAssets(getAssetCallbacks());
+            }
         });
+
+        // Tab switching event handlers
+        if (UI.elements.tabPNG) {
+            UI.elements.tabPNG.addEventListener("click", () => switchTab(AssetTab.PNG));
+        }
+        if (UI.elements.tabAI) {
+            UI.elements.tabAI.addEventListener("click", () => switchTab(AssetTab.AI));
+        }
 
         UI.elements.settingsButton.addEventListener("click", () => {
             log("Settings opened.");
@@ -394,11 +519,25 @@
         });
 
         if (UI.elements.clearSelectionBtn) {
-            UI.elements.clearSelectionBtn.addEventListener("click", AssetController.clearSelection);
+            UI.elements.clearSelectionBtn.addEventListener("click", () => {
+                const state = State.getState();
+                if (state.currentTab === AssetTab.AI) {
+                    AssetController.clearAISelection();
+                } else {
+                    AssetController.clearSelection();
+                }
+            });
         }
 
         if (UI.elements.importSelectedBtn) {
-            UI.elements.importSelectedBtn.addEventListener("click", AssetController.handleImportSelected);
+            UI.elements.importSelectedBtn.addEventListener("click", () => {
+                const state = State.getState();
+                if (state.currentTab === AssetTab.AI) {
+                    AssetController.handleImportSelectedAI();
+                } else {
+                    AssetController.handleImportSelected();
+                }
+            });
         }
 
         document.addEventListener("keydown", (e) => {
@@ -486,6 +625,7 @@
                             }
                             break;
                         case "preview":
+                            // AI assets don't have preview
                             if (callbacks.onPreview) {
                                 callbacks.onPreview(asset);
                             }
@@ -557,13 +697,25 @@
                 if (entry.isIntersecting && !isLoadingMore) {
                     const state = State.getState();
                     // Only load more if not on welcome screen and there are more to load
-                    if (!state.isWelcome && state.displayedAssets.length < state.searchResults.length) {
-                        isLoadingMore = true;
-                        AssetController.loadMoreAssets(getAssetCallbacks());
-                        // Reset flag after a short delay
-                        setTimeout(() => {
-                            isLoadingMore = false;
-                        }, 100);
+                    if (!state.isWelcome) {
+                        // Check based on current tab
+                        if (state.currentTab === AssetTab.AI) {
+                            if (state.displayedAIAssets.length < state.searchAIResults.length) {
+                                isLoadingMore = true;
+                                AssetController.loadMoreAIAssets(getAIAssetCallbacks());
+                                setTimeout(() => {
+                                    isLoadingMore = false;
+                                }, 100);
+                            }
+                        } else {
+                            if (state.displayedAssets.length < state.searchResults.length) {
+                                isLoadingMore = true;
+                                AssetController.loadMoreAssets(getAssetCallbacks());
+                                setTimeout(() => {
+                                    isLoadingMore = false;
+                                }, 100);
+                            }
+                        }
                     }
                 }
             });
@@ -643,8 +795,11 @@
             // Check if cache folder needs to be created and show notice
             FS.checkAndNotifyCacheCreation();
 
-            // Show sync modal on initial load
+            // Show sync modal on initial load for PNG assets
             AssetController.syncAssets(getAssetCallbacks(), true);
+            
+            // Also preload AI assets in background (don't show sync modal)
+            AssetController.syncAIAssets(getAIAssetCallbacks(), false);
 
             startVersionCheckInterval();
 

@@ -292,8 +292,162 @@
         });
     };
 
+    /**
+     * Downloads an AI file to the cache folder (no PNG repair needed)
+     * @param {string} downloadUrl - URL to download from
+     * @param {string} fileName - Original file name
+     * @param {Object} headers - Optional HTTP headers
+     * @param {Function} onProgress - Optional progress callback (downloaded, total)
+     * @returns {Promise<string>} Path to the downloaded file
+     */
+    const downloadAIFileToCache = async (downloadUrl, fileName, headers = {}, onProgress) => {
+        const safeName = Utils.sanitizeFileName(fileName);
+
+        // Prefer Node.js (enabled via --enable-nodejs in the manifest)
+        if (typeof require === "function") {
+            log("Downloading AI file via Node.js stream...");
+
+            /** @type {typeof import('fs')} */
+            const fs = require("fs");
+            /** @type {typeof import('path')} */
+            const path = require("path");
+            /** @type {typeof import('http')} */
+            const http = require("http");
+            /** @type {typeof import('https')} */
+            const https = require("https");
+
+            return new Promise((resolve, reject) => {
+                try {
+                    const cacheDir = getCacheFolderPath();
+                    if (!fs.existsSync(cacheDir)) {
+                        fs.mkdirSync(cacheDir, { recursive: true });
+                    }
+
+                    const filePath = path.join(cacheDir, safeName);
+                    const fileStream = fs.createWriteStream(filePath);
+                    
+                    const makeRequest = (url) => {
+                        const urlObj = new URL(url);
+                        const options = {
+                            hostname: urlObj.hostname,
+                            port: urlObj.port || (urlObj.protocol === 'https:' ? 443 : 80),
+                            path: urlObj.pathname + urlObj.search,
+                            method: 'GET',
+                            headers: headers
+                        };
+    
+                        const client = urlObj.protocol === "https:" ? https : http;
+    
+                        const request = client.get(options, (response) => {
+                            // Handle Redirects
+                            if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+                                log(`Redirecting to ${response.headers.location}...`);
+                                request.destroy();
+                                makeRequest(response.headers.location);
+                                return;
+                            }
+
+                            if (response.statusCode !== 200) {
+                                const message = "Failed to download AI file: " + response.statusCode + " " + (response.statusMessage || "");
+                                response.resume();
+                                reject(new Error(message));
+                                return;
+                            }
+
+                            // Track download progress
+                            const totalSize = parseInt(response.headers['content-length'], 10) || 0;
+                            let downloadedSize = 0;
+
+                            response.on('data', (chunk) => {
+                                downloadedSize += chunk.length;
+                                if (onProgress && totalSize > 0) {
+                                    onProgress(downloadedSize, totalSize);
+                                }
+                            });
+    
+                            response.pipe(fileStream);
+    
+                            fileStream.on("finish", function () {
+                                fileStream.close(function () {
+                                    // No PNG repair needed for AI files
+                                    const normalizedPath = filePath.replace(/\\/g, "/");
+                                    log("Downloaded AI file: " + normalizedPath);
+                                    resolve(normalizedPath);
+                                });
+                            });
+                        });
+    
+                        request.on("error", function (error) {
+                            try {
+                                fileStream.close();
+                                fs.unlinkSync(filePath);
+                            } catch (e) {
+                                // ignore cleanup errors
+                            }
+                            reject(error);
+                        });
+                    };
+
+                    makeRequest(downloadUrl);
+
+                } catch (error) {
+                    reject(error);
+                }
+            });
+        }
+
+        // Fallback: browser fetch + base64 encoding
+        log("Downloading AI file via fetch/blob fallback...");
+        const response = await fetch(downloadUrl, {
+            method: "GET",
+            cache: "no-cache",
+            headers: headers
+        });
+
+        if (!response.ok) {
+            throw new Error("Failed to download AI file: " + response.status + " " + response.statusText);
+        }
+
+        const blob = await response.blob();
+        const sizeInMB = (blob.size / 1024 / 1024).toFixed(2);
+
+        log("Downloaded " + sizeInMB + " MB AI file");
+
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+
+            reader.onload = async () => {
+                try {
+                    const base64 = reader.result.split(",")[1];
+                    log("Converted AI file to base64, saving as " + safeName + " via JSX...");
+
+                    const tempPath = await Utils.evalScript(
+                        'saveToTemp(\"' + Utils.escapeForEval(base64) + '\", \"' + Utils.escapeForEval(safeName) + '\")'
+                    );
+
+                    if (!tempPath || (typeof tempPath === "string" && tempPath.indexOf("Error") === 0)) {
+                        reject(new Error(tempPath || "Failed to save AI file"));
+                        return;
+                    }
+
+                    log("AI file saved via JSX: " + tempPath);
+                    resolve(tempPath);
+                } catch (error) {
+                    reject(error);
+                }
+            };
+
+            reader.onerror = () => {
+                reject(new Error("Failed to read downloaded AI file"));
+            };
+
+            reader.readAsDataURL(blob);
+        });
+    };
+
     global.Views.FileSystem = {
         downloadFileToTemp,
+        downloadAIFileToCache,
         getCacheFolderPath,
         cacheExists,
         checkAndNotifyCacheCreation
